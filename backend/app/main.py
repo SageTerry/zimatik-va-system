@@ -6,6 +6,7 @@ import sys
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from app.api.findings import router as findings_router
 from app.config import settings
 
 logging.basicConfig(
@@ -24,6 +25,9 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+app.include_router(findings_router)
 
 
 @app.get("/health")
