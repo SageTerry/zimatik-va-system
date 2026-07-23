@@ -36,6 +36,11 @@ class Settings(BaseSettings):
     NESSUS_SECRET_KEY: str = ""
     NESSUS_VERIFY_SSL: bool = True
 
+    # SonarQube API
+    SONARQUBE_URL: str = ""
+    SONARQUBE_TOKEN: str = ""
+    SONARQUBE_VERIFY_SSL: bool = True
+
     @field_validator("CORS_ORIGINS", mode="before")
     @classmethod
     def _split_cors_origins(cls, value: Union[str, List[str]]) -> List[str]:
