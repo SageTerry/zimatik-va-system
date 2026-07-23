@@ -25,7 +25,7 @@ class Settings(BaseSettings):
     CORS_ORIGINS: List[str] = ["http://localhost:3000"]
 
     # Database (PostgreSQL)
-    DATABASE_URL: str = "postgresql://vace_user:vace_password@localhost:5432/vace_db"
+    DATABASE_URL: str = "postgresql+psycopg://vace_user:vace_password@localhost:5432/vace_db"
 
     # Redis (used for caching / task queue)
     REDIS_URL: str = "redis://localhost:6379/0"
