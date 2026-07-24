@@ -30,4 +30,8 @@ export async function getScans() {
   return data
 }
 
+export async function downloadTechnicalReport(payload) {
+  return apiClient.post('/reports/technical', payload, { responseType: 'blob' })
+}
+
 export default apiClient

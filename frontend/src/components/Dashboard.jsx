@@ -1,8 +1,19 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { Cell, Legend, Pie, PieChart, ResponsiveContainer, Tooltip } from 'recharts'
-import { getStats } from '../api/client'
+import { getFindings, getStats } from '../api/client'
+import ReportDownloadButton from './ReportDownloadButton'
 import { SEVERITY_ORDER, SEVERITY_STYLES } from '../lib/constants'
+
+// The report endpoint takes explicit finding_ids rather than "everything" -
+// this pulls the first page at the API's max page size, which comfortably
+// covers this portfolio project's dataset size.
+const REPORT_FINDING_LIMIT = 200
+
+async function getAllFindingIdsForReport() {
+  const data = await getFindings({ page: 1, page_size: REPORT_FINDING_LIMIT })
+  return data.items.length ? { finding_ids: data.items.map((f) => f.id) } : null
+}
 
 function StatCard({ label, value, accent }) {
   return (
@@ -59,11 +70,14 @@ export default function Dashboard() {
 
   return (
     <div className="space-y-8">
-      <div>
-        <h1 className="text-2xl font-bold text-white">Overview</h1>
-        <p className="mt-1 text-sm text-gray-400">
-          Consolidated vulnerability posture across all connected scanners.
-        </p>
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <div>
+          <h1 className="text-2xl font-bold text-white">Overview</h1>
+          <p className="mt-1 text-sm text-gray-400">
+            Consolidated vulnerability posture across all connected scanners.
+          </p>
+        </div>
+        <ReportDownloadButton label="Download Technical Report" getPayload={getAllFindingIdsForReport} />
       </div>
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">

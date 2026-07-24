@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { getFindings } from '../api/client'
+import ReportDownloadButton from './ReportDownloadButton'
 import { SEVERITY_ORDER, SEVERITY_STYLES, TOOL_OPTIONS } from '../lib/constants'
 
 const PAGE_SIZE = 25
@@ -97,7 +98,14 @@ export default function FindingsList() {
           </p>
         </div>
 
-        <div className="flex flex-wrap gap-3">
+        <div className="flex flex-wrap items-start gap-3">
+          <ReportDownloadButton
+            label="Download Technical Report"
+            getPayload={() =>
+              sortedFindings.length ? { finding_ids: sortedFindings.map((f) => f.id) } : null
+            }
+          />
+
           <select
             value={severityFilter}
             onChange={(e) => handleSeverityChange(e.target.value)}

@@ -24,6 +24,10 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    # Browsers hide response headers cross-origin unless explicitly exposed;
+    # the frontend reads this to name downloaded report PDFs after the
+    # server-generated filename instead of falling back to a client-side one.
+    expose_headers=["Content-Disposition"],
 )
 
 

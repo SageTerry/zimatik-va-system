@@ -18,7 +18,8 @@ from datetime import datetime, timezone
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, status
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from fastapi.responses import Response
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from sqlalchemy import case, func, select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
@@ -36,6 +37,7 @@ from app.models.finding import (
 )
 from app.services.deduplication import apply_dedup
 from app.services.nessus_client import get_nessus_client
+from app.services.report_generator import ReportGenerator
 from app.services.sonarqube_client import get_sonarqube_client
 
 logger = logging.getLogger(__name__)
@@ -141,6 +143,17 @@ class StatsResponse(BaseModel):
     by_severity: Dict[str, int]
     by_tool: Dict[str, int]
     affected_hosts: int
+
+
+class TechnicalReportRequest(BaseModel):
+    scan_id: Optional[uuid.UUID] = None
+    finding_ids: Optional[List[uuid.UUID]] = Field(None, min_length=1)
+
+    @model_validator(mode="after")
+    def _require_scan_id_or_finding_ids(self) -> "TechnicalReportRequest":
+        if not self.scan_id and not self.finding_ids:
+            raise ValueError("Provide either scan_id or finding_ids.")
+        return self
 
 
 # --- Import orchestration (runs in a background task, own DB session) --------
@@ -460,4 +473,77 @@ async def get_stats(db: Session = Depends(get_db)) -> StatsResponse:
         by_severity={severity.value: count for severity, count in severity_rows},
         by_tool={tool.value: count for tool, count in tool_rows},
         affected_hosts=affected_hosts,
+    )
+
+
+@router.post("/reports/technical")
+async def generate_technical_report(
+    payload: TechnicalReportRequest, db: Session = Depends(get_db)
+) -> Response:
+    """Generate a PDF technical assessment report for a scan or a set of findings.
+
+    Accepts either ``scan_id`` (report covers every finding in that scan) or
+    ``finding_ids`` (report covers exactly that set, which may span multiple
+    scans). Returns the PDF as a downloadable attachment.
+    """
+    try:
+        if payload.finding_ids:
+            findings = (
+                db.execute(select(Finding).where(Finding.id.in_(payload.finding_ids)))
+                .scalars()
+                .all()
+            )
+            if not findings:
+                raise HTTPException(
+                    status_code=404, detail="No findings found for the given finding_ids"
+                )
+            scan_ids = {f.scan_id for f in findings}
+            scans = db.execute(select(Scan).where(Scan.id.in_(scan_ids))).scalars().all()
+        else:
+            scan = db.get(Scan, payload.scan_id)
+            if scan is None:
+                raise HTTPException(status_code=404, detail=f"Scan {payload.scan_id} not found")
+            findings = (
+                db.execute(select(Finding).where(Finding.scan_id == scan.id))
+                .scalars()
+                .all()
+            )
+            scans = [scan]
+    except SQLAlchemyError:
+        logger.exception("Failed to load findings for technical report: payload=%s", payload)
+        raise HTTPException(status_code=500, detail="Failed to load findings for report") from None
+
+    generated_at = datetime.now(timezone.utc)
+    scan_metadata = {
+        "scope": ", ".join(sorted({s.scope for s in scans})) if scans else None,
+        "scans": [
+            {
+                "name": s.name,
+                "scope": s.scope,
+                "status": s.status.value,
+                "started_at": s.started_at,
+                "completed_at": s.completed_at,
+            }
+            for s in scans
+        ],
+        "generated_at": generated_at,
+    }
+
+    try:
+        pdf_bytes = ReportGenerator().generate_technical_report(findings, scan_metadata)
+    except Exception:
+        logger.exception("Failed to render technical report: payload=%s", payload)
+        raise HTTPException(status_code=500, detail="Failed to generate report") from None
+
+    filename = f"VACE-report-{generated_at.strftime('%Y-%m-%d')}.pdf"
+    logger.info(
+        "Generated technical report: findings=%d scans=%d filename=%s",
+        len(findings),
+        len(scans),
+        filename,
+    )
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )

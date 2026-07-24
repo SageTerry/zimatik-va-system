@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { getFindingById } from '../api/client'
+import ReportDownloadButton from './ReportDownloadButton'
 import { REMEDIATION_STATUS_STYLES, SEVERITY_STYLES } from '../lib/constants'
 
 function Field({ label, value }) {
@@ -93,7 +94,20 @@ function FindingDetailView({ id }) {
 
   return (
     <div className="space-y-6">
-      {backButton}
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        {backButton}
+        <div className="flex flex-wrap gap-3">
+          <ReportDownloadButton
+            label="Export as PDF"
+            getPayload={() => ({ finding_ids: [finding.id] })}
+          />
+          <ReportDownloadButton
+            label="Export Full Scan Report"
+            getPayload={() => ({ scan_id: finding.scan_id })}
+            className="inline-flex items-center gap-2 rounded-md border border-gray-700 px-4 py-2 text-sm font-medium text-gray-400 transition hover:border-gray-600 hover:text-gray-200 disabled:cursor-not-allowed disabled:opacity-50"
+          />
+        </div>
+      </div>
 
       <div>
         <div className="flex flex-wrap items-center gap-3">
