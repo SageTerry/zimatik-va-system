@@ -34,6 +34,7 @@ from app.models.finding import (
     Severity,
     ToolSource,
 )
+from app.services.deduplication import apply_dedup
 from app.services.nessus_client import get_nessus_client
 from app.services.sonarqube_client import get_sonarqube_client
 
@@ -169,7 +170,10 @@ def _import_nessus(db: Session, scan: Scan) -> Tuple[int, int]:
                 )
                 errors += 1
                 continue
-            db.add(Finding(scan_id=scan.id, **normalized))
+            finding = Finding(scan_id=scan.id, **normalized)
+            apply_dedup(db, finding)
+            db.add(finding)
+            db.flush()
             imported += 1
 
     return imported, errors
@@ -199,7 +203,10 @@ def _import_sonarqube(db: Session, scan: Scan) -> Tuple[int, int]:
                 )
                 errors += 1
                 continue
-            db.add(Finding(scan_id=scan.id, **normalized))
+            finding = Finding(scan_id=scan.id, **normalized)
+            apply_dedup(db, finding)
+            db.add(finding)
+            db.flush()
             imported += 1
 
     return imported, errors
