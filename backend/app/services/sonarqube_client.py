@@ -14,13 +14,16 @@ from __future__ import annotations
 
 import logging
 import re
-from functools import lru_cache
-from typing import Any, Dict, List, Optional, TypedDict
+from typing import Any, Dict, List, Optional, Tuple, TypedDict
 
 import requests
+from sqlalchemy import select
+from sqlalchemy.orm import Session
 
 from app.config import settings
+from app.models.credentials import CredentialStore, CredentialTool
 from app.models.finding import LocationType, Severity, ToolSource
+from app.services import crypto
 
 logger = logging.getLogger(__name__)
 
@@ -251,6 +254,23 @@ class SonarQubeClient:
         ]
         return "\n".join(formatted)
 
+    def test_connection(self) -> Tuple[bool, str]:
+        """Check that the configured base_url/token actually authenticate.
+
+        Uses SonarQube's dedicated ``/api/authentication/validate`` endpoint,
+        which reports token validity directly, rather than
+        ``get_projects``/``get_issues`` which swallow errors and degrade to
+        an empty list. Exists specifically so the Settings page can report
+        success/failure.
+        """
+        try:
+            payload = self._request("GET", "/api/authentication/validate")
+        except SonarQubeAPIError as exc:
+            return False, f"Connection failed: {exc}"
+        if payload.get("valid"):
+            return True, "Connected successfully."
+        return False, "Authentication failed: token was rejected."
+
     def normalize_finding(self, sonarqube_issue: Dict[str, Any]) -> NormalizedFinding:
         """Convert one raw SonarQube issue (from ``get_issues``) into VACE's unified schema.
 
@@ -350,13 +370,27 @@ class SonarQubeClient:
         return _HTML_TAG_RE.sub("", text).strip()
 
 
-@lru_cache
-def get_sonarqube_client() -> SonarQubeClient:
-    """Return the process-wide SonarQube client, built from environment settings.
+def get_sonarqube_client(db: Session) -> SonarQubeClient:
+    """Build a SonarQube client from the stored credential, if one's been
+    saved via the Settings page; otherwise falls back to ``.env``-configured
+    settings so a freshly-cloned instance still works before anyone's
+    visited Settings.
 
-    Reads ``SONARQUBE_URL`` / ``SONARQUBE_TOKEN`` / ``SONARQUBE_VERIFY_SSL``
-    from ``app.config.settings`` (see ``.env``).
+    Built fresh on every call (not cached) since credentials can change at
+    runtime and should take effect on the very next import without a
+    restart.
     """
+    credential = db.execute(
+        select(CredentialStore).where(CredentialStore.tool == CredentialTool.SONARQUBE)
+    ).scalar_one_or_none()
+
+    if credential is not None:
+        return SonarQubeClient(
+            base_url=credential.base_url,
+            token=crypto.decrypt(credential.api_key) or "",
+            verify_ssl=settings.SONARQUBE_VERIFY_SSL,
+        )
+
     return SonarQubeClient(
         base_url=settings.SONARQUBE_URL,
         token=settings.SONARQUBE_TOKEN,

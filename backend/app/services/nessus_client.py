@@ -13,13 +13,16 @@ session cookies, so a client only needs an access key / secret key pair
 from __future__ import annotations
 
 import logging
-from functools import lru_cache
-from typing import Any, Dict, List, Optional, TypedDict
+from typing import Any, Dict, List, Optional, Tuple, TypedDict
 
 import requests
+from sqlalchemy import select
+from sqlalchemy.orm import Session
 
 from app.config import settings
+from app.models.credentials import CredentialStore, CredentialTool
 from app.models.finding import LocationType, Severity, ToolSource
+from app.services import crypto
 
 logger = logging.getLogger(__name__)
 
@@ -208,6 +211,19 @@ class NessusClient:
 
         return findings
 
+    def test_connection(self) -> Tuple[bool, str]:
+        """Check that the configured base_url/access_key/secret_key actually work.
+
+        Unlike ``get_scans``/``get_scan_details``, which swallow errors and
+        degrade to an empty list, this surfaces the failure - it exists
+        specifically so the Settings page can report success/failure.
+        """
+        try:
+            self._request("GET", "/scans")
+        except NessusAPIError as exc:
+            return False, f"Connection failed: {exc}"
+        return True, "Connected successfully."
+
     def normalize_finding(self, nessus_finding: Dict[str, Any]) -> NormalizedFinding:
         """Convert one raw Nessus finding (from ``get_scan_details``) into VACE's unified schema.
 
@@ -300,13 +316,28 @@ class NessusClient:
         return hostname, None, None
 
 
-@lru_cache
-def get_nessus_client() -> NessusClient:
-    """Return the process-wide Nessus client, built from environment settings.
+def get_nessus_client(db: Session) -> NessusClient:
+    """Build a Nessus client from the stored credential, if one's been saved
+    via the Settings page; otherwise falls back to ``.env``-configured
+    settings so a freshly-cloned instance still works before anyone's
+    visited Settings.
 
-    Reads ``NESSUS_URL`` / ``NESSUS_ACCESS_KEY`` / ``NESSUS_SECRET_KEY`` /
-    ``NESSUS_VERIFY_SSL`` from ``app.config.settings`` (see ``.env``).
+    Built fresh on every call (not cached) since credentials can change at
+    runtime and should take effect on the very next import without a
+    restart.
     """
+    credential = db.execute(
+        select(CredentialStore).where(CredentialStore.tool == CredentialTool.NESSUS)
+    ).scalar_one_or_none()
+
+    if credential is not None:
+        return NessusClient(
+            base_url=credential.base_url,
+            access_key=crypto.decrypt(credential.api_key) or "",
+            secret_key=crypto.decrypt(credential.api_secret) or "",
+            verify_ssl=settings.NESSUS_VERIFY_SSL,
+        )
+
     return NessusClient(
         base_url=settings.NESSUS_URL,
         access_key=settings.NESSUS_ACCESS_KEY,

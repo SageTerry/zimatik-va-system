@@ -2,6 +2,7 @@ import { NavLink, Route, Routes } from 'react-router-dom'
 import Dashboard from './components/Dashboard'
 import FindingDetail from './components/FindingDetail'
 import FindingsList from './components/FindingsList'
+import SettingsPage from './components/SettingsPage'
 
 function NavItem({ to, children }) {
   return (
@@ -38,6 +39,7 @@ function App() {
           <nav className="flex items-center gap-1">
             <NavItem to="/">Dashboard</NavItem>
             <NavItem to="/findings">Findings</NavItem>
+            <NavItem to="/settings">Settings</NavItem>
           </nav>
         </div>
       </header>
@@ -47,6 +49,7 @@ function App() {
           <Route path="/" element={<Dashboard />} />
           <Route path="/findings" element={<FindingsList />} />
           <Route path="/findings/:id" element={<FindingDetail />} />
+          <Route path="/settings" element={<SettingsPage />} />
         </Routes>
       </main>
     </div>

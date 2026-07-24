@@ -164,7 +164,7 @@ def _import_nessus(db: Session, scan: Scan) -> Tuple[int, int]:
 
     Returns (imported_count, error_count).
     """
-    client = get_nessus_client()
+    client = get_nessus_client(db)
     imported = 0
     errors = 0
 
@@ -197,7 +197,7 @@ def _import_sonarqube(db: Session, scan: Scan) -> Tuple[int, int]:
 
     Returns (imported_count, error_count).
     """
-    client = get_sonarqube_client()
+    client = get_sonarqube_client(db)
     imported = 0
     errors = 0
 

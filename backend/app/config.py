@@ -41,6 +41,13 @@ class Settings(BaseSettings):
     SONARQUBE_TOKEN: str = ""
     SONARQUBE_VERIFY_SSL: bool = True
 
+    # Fernet key encrypting scanner credentials at rest in CredentialStore.
+    # The default below is fine for local dev but MUST be overridden in any
+    # shared/deployed environment - generate one with:
+    #   python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+    # Changing this key makes previously-stored credentials undecryptable.
+    CREDENTIAL_ENCRYPTION_KEY: str = "9IjOrH5C0oVmRVjoQwIJKD2ygdM_CkntKavaAHrT-jc="
+
     @field_validator("CORS_ORIGINS", mode="before")
     @classmethod
     def _split_cors_origins(cls, value: Union[str, List[str]]) -> List[str]:

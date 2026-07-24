@@ -1,5 +1,6 @@
 """ORM model package for VACE."""
 
+from app.models.credentials import CredentialStore, CredentialTool
 from app.models.finding import (
     FalsePositiveRisk,
     Finding,
@@ -20,4 +21,6 @@ __all__ = [
     "LocationType",
     "FalsePositiveRisk",
     "RemediationStatus",
+    "CredentialStore",
+    "CredentialTool",
 ]
