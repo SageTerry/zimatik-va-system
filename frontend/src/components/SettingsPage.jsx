@@ -188,7 +188,7 @@ export default function SettingsPage() {
       <div>
         <h1 className="font-display text-display text-ink">Settings</h1>
         <p className="mt-1 font-body text-ink-2">
-          Configure the scanner credentials VACE uses to import findings from Nessus and SonarQube.
+          Configure the scanner credentials VACE uses to import findings from Nessus, SonarQube, and ZAP.
         </p>
       </div>
 
@@ -210,6 +210,15 @@ export default function SettingsPage() {
           fields={[
             { key: 'base_url', label: 'Base URL', placeholder: 'https://sonarqube.internal:9000', required: true },
             { key: 'api_key', label: 'Token', secret: true, required: true },
+          ]}
+        />
+        <CredentialCard
+          tool="ZAP"
+          title="OWASP ZAP"
+          description="Web application scanner used for URL-based findings. Point this at a running ZAP daemon; the API key is optional and only needed if the daemon was started with api.disablekey=false."
+          fields={[
+            { key: 'base_url', label: 'Base URL', placeholder: 'http://localhost:8090', required: true },
+            { key: 'api_key', label: 'API Key (optional)', secret: true, required: false },
           ]}
         />
       </div>
