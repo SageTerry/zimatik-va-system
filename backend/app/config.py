@@ -22,7 +22,7 @@ class Settings(BaseSettings):
     LOG_LEVEL: str = "INFO"
 
     # CORS - comma-separated list of allowed origins in the environment
-    CORS_ORIGINS: List[str] = ["http://localhost:3000"]
+    CORS_ORIGINS: List[str] = ["http://localhost:3000", "http://localhost:5173"]
 
     # Database (PostgreSQL)
     DATABASE_URL: str = "postgresql+psycopg://vace_user:vace_password@localhost:5432/vace_db"
@@ -40,6 +40,11 @@ class Settings(BaseSettings):
     SONARQUBE_URL: str = ""
     SONARQUBE_TOKEN: str = ""
     SONARQUBE_VERIFY_SSL: bool = True
+
+    # OWASP ZAP API (daemon mode; api_key optional, off by default in docker-compose)
+    ZAP_URL: str = "http://localhost:8090"
+    ZAP_API_KEY: str = ""
+    ZAP_VERIFY_SSL: bool = True
 
     # Fernet key encrypting scanner credentials at rest in CredentialStore.
     # The default below is fine for local dev but MUST be overridden in any
