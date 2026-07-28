@@ -93,6 +93,9 @@ class Scan(Base):
     """
 
     __tablename__ = "scans"
+    __table_args__ = (
+        CheckConstraint("progress BETWEEN 0 AND 100", name="ck_scans_progress_range"),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
@@ -115,6 +118,18 @@ class Scan(Base):
         nullable=False,
         default=dict,
         doc='Which tools fed this scan, e.g. {"nessus": true, "sonarqube": true}.',
+    )
+    progress: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        default=0,
+        doc="0-100 completion percentage for scans that report live progress (e.g. ZAP).",
+    )
+    tool_statuses: Mapped[dict] = mapped_column(
+        JSONB,
+        nullable=False,
+        default=dict,
+        doc='Per-tool live status during an in-progress scan, e.g. {"zap": "scanning"}.',
     )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()

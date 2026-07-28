@@ -22,6 +22,7 @@ class CredentialTool(str, PyEnum):
 
     NESSUS = "NESSUS"
     SONARQUBE = "SONARQUBE"
+    ZAP = "ZAP"
 
 
 class CredentialStore(Base):
