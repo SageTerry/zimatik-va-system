@@ -10,15 +10,18 @@ FastAPI's standard pattern of running sync dependencies in a threadpool.
 
 from __future__ import annotations
 
+import asyncio
+import json
 import logging
 import math
+import time
 import uuid
 from collections import defaultdict
 from datetime import datetime, timezone
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, status
-from fastapi.responses import Response
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request, status
+from fastapi.responses import Response, StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from sqlalchemy import case, func, select
 from sqlalchemy.exc import SQLAlchemyError
@@ -39,10 +42,15 @@ from app.services.deduplication import apply_dedup
 from app.services.nessus_client import get_nessus_client
 from app.services.report_generator import ReportGenerator
 from app.services.sonarqube_client import get_sonarqube_client
+from app.services.zap_client import ACTIVE_SCAN_TIMEOUT, ZapAPIError, get_zap_client
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/v1", tags=["findings"])
+
+ZAP_POLL_INTERVAL_SECONDS = 5  # how often _import_zap polls ZAP for active-scan progress
+SSE_POLL_INTERVAL_SECONDS = 2  # how often the progress stream re-reads the DB
+SSE_MAX_STREAM_SECONDS = 1800  # safety cap so a stuck scan doesn't hold a connection open forever
 
 
 # --- Schemas ------------------------------------------------------------------
@@ -130,6 +138,8 @@ class ScanRead(BaseModel):
     scope: str
     status: ScanStatus
     tool_sources: Dict[str, Any]
+    progress: int
+    tool_statuses: Dict[str, Any]
     started_at: Optional[datetime] = None
     completed_at: Optional[datetime] = None
     created_at: datetime
@@ -225,9 +235,83 @@ def _import_sonarqube(db: Session, scan: Scan) -> Tuple[int, int]:
     return imported, errors
 
 
+def _update_scan_progress(db: Session, scan: Scan, *, tool_status: str, progress: int) -> None:
+    """Persist a live progress update so ``GET /scans/{id}/progress`` (reading
+    via its own, separate DB session) can observe it without waiting for the
+    whole import to finish.
+    """
+    scan.tool_statuses = {**scan.tool_statuses, "zap": tool_status}
+    scan.progress = progress
+    db.commit()
+
+
+def _import_zap(db: Session, scan: Scan) -> Tuple[int, int]:
+    """Trigger a live ZAP spider + active scan against ``scan.scope`` and persist its findings.
+
+    Unlike Nessus/SonarQube, which only pull results from scans that
+    already ran, ZAP's scan is triggered here and can take 5-15+ minutes on
+    a real target; progress is written back to ``scan.progress``/
+    ``scan.tool_statuses`` as it runs so ``GET /scans/{id}/progress`` has
+    something fresh to stream. The spider phase covers the first 20% of
+    ``scan.progress``, the active scan phase the next 75%, and normalizing
+    + storing findings the final 5%.
+
+    Returns (imported_count, error_count).
+    """
+    client = get_zap_client(db)
+    target_url = scan.scope
+
+    _update_scan_progress(db, scan, tool_status="spidering", progress=5)
+    try:
+        zap_scan_id = client.start_scan(target_url)
+    except ZapAPIError:
+        logger.exception("ZAP scan failed to start for scan_id=%s target=%s", scan.id, target_url)
+        _update_scan_progress(db, scan, tool_status="failed", progress=scan.progress)
+        raise
+
+    _update_scan_progress(db, scan, tool_status="scanning", progress=20)
+    deadline = time.monotonic() + ACTIVE_SCAN_TIMEOUT
+    while True:
+        status_str, percent = client.get_progress(zap_scan_id)
+        overall = 20 + round(percent * 0.75)
+        _update_scan_progress(db, scan, tool_status="scanning", progress=overall)
+        if status_str == "COMPLETED":
+            break
+        if time.monotonic() >= deadline:
+            logger.error(
+                "ZAP active scan %s for scan_id=%s did not finish within %ss; giving up",
+                zap_scan_id,
+                scan.id,
+                ACTIVE_SCAN_TIMEOUT,
+            )
+            _update_scan_progress(db, scan, tool_status="failed", progress=overall)
+            raise ZapAPIError(f"ZAP active scan did not finish within {ACTIVE_SCAN_TIMEOUT}s")
+        time.sleep(ZAP_POLL_INTERVAL_SECONDS)
+
+    _update_scan_progress(db, scan, tool_status="processing", progress=95)
+    imported = 0
+    errors = 0
+    for raw_alert in client.get_findings(zap_scan_id):
+        try:
+            normalized = client.normalize_finding(raw_alert)
+        except Exception:
+            logger.exception("Failed to normalize ZAP alert for scan_id=%s", scan.id)
+            errors += 1
+            continue
+        finding = Finding(scan_id=scan.id, **normalized)
+        apply_dedup(db, finding)
+        db.add(finding)
+        db.flush()
+        imported += 1
+
+    _update_scan_progress(db, scan, tool_status="completed", progress=100)
+    return imported, errors
+
+
 _IMPORTERS: Dict[ToolSource, Callable[[Session, Scan], Tuple[int, int]]] = {
     ToolSource.NESSUS: _import_nessus,
     ToolSource.SONARQUBE: _import_sonarqube,
+    ToolSource.ZAP: _import_zap,
 }
 
 
@@ -434,6 +518,8 @@ async def list_scans(db: Session = Depends(get_db)) -> List[ScanRead]:
                 scope=scan.scope,
                 status=scan.status,
                 tool_sources=scan.tool_sources,
+                progress=scan.progress,
+                tool_statuses=scan.tool_statuses,
                 started_at=scan.started_at,
                 completed_at=scan.completed_at,
                 created_at=scan.created_at,
@@ -445,6 +531,41 @@ async def list_scans(db: Session = Depends(get_db)) -> List[ScanRead]:
 
     logger.info("Listed %d scans", len(results))
     return results
+
+
+@router.get("/scans/{scan_id}", response_model=ScanRead)
+async def get_scan(scan_id: uuid.UUID, db: Session = Depends(get_db)) -> ScanRead:
+    """Fetch a single scan with its per-severity finding counts."""
+    try:
+        scan = db.get(Scan, scan_id)
+        severity_rows = db.execute(
+            select(Finding.severity_normalized, func.count(Finding.id))
+            .where(Finding.scan_id == scan_id)
+            .group_by(Finding.severity_normalized)
+        ).all()
+    except SQLAlchemyError:
+        logger.exception("Failed to fetch scan_id=%s", scan_id)
+        raise HTTPException(status_code=500, detail="Failed to retrieve scan") from None
+
+    if scan is None:
+        raise HTTPException(status_code=404, detail=f"Scan {scan_id} not found")
+
+    severity_counts = {severity.value: count for severity, count in severity_rows}
+    return ScanRead(
+        id=scan.id,
+        name=scan.name,
+        scope=scan.scope,
+        status=scan.status,
+        tool_sources=scan.tool_sources,
+        progress=scan.progress,
+        tool_statuses=scan.tool_statuses,
+        started_at=scan.started_at,
+        completed_at=scan.completed_at,
+        created_at=scan.created_at,
+        updated_at=scan.updated_at,
+        total_findings=sum(severity_counts.values()),
+        findings_by_severity=severity_counts,
+    )
 
 
 @router.get("/stats", response_model=StatsResponse)
@@ -546,4 +667,65 @@ async def generate_technical_report(
         content=pdf_bytes,
         media_type="application/pdf",
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+async def _scan_progress_events(scan_id: uuid.UUID, request: Request):
+    """Async generator yielding SSE ``data: {...}`` frames until the scan finishes.
+
+    Each iteration opens its own short-lived DB session so it reads
+    whatever the background import task (running in its own session) has
+    most recently committed, rather than a stale snapshot from one
+    long-lived session.
+    """
+    session_factory = get_session_factory()
+    deadline = time.monotonic() + SSE_MAX_STREAM_SECONDS
+
+    while True:
+        if await request.is_disconnected():
+            logger.info("Client disconnected from progress stream for scan_id=%s", scan_id)
+            return
+
+        db = session_factory()
+        try:
+            scan = db.get(Scan, scan_id)
+        finally:
+            db.close()
+
+        if scan is None:
+            yield f"data: {json.dumps({'scan_id': str(scan_id), 'error': 'scan not found'})}\n\n"
+            return
+
+        payload = {
+            "scan_id": str(scan.id),
+            "progress": scan.progress,
+            "status": scan.status.value,
+            "tool_statuses": scan.tool_statuses,
+        }
+        yield f"data: {json.dumps(payload)}\n\n"
+
+        if scan.status in (ScanStatus.COMPLETED, ScanStatus.FAILED):
+            return
+        if time.monotonic() >= deadline:
+            logger.warning(
+                "Progress stream for scan_id=%s hit the %ss safety cap; closing",
+                scan_id,
+                SSE_MAX_STREAM_SECONDS,
+            )
+            return
+
+        await asyncio.sleep(SSE_POLL_INTERVAL_SECONDS)
+
+
+@router.get("/scans/{scan_id}/progress")
+async def stream_scan_progress(scan_id: uuid.UUID, request: Request) -> StreamingResponse:
+    """Server-Sent-Events stream of a scan's live progress.
+
+    Polls the DB every ``SSE_POLL_INTERVAL_SECONDS`` and closes the stream
+    once the scan reaches ``COMPLETED`` or ``FAILED``.
+    """
+    return StreamingResponse(
+        _scan_progress_events(scan_id, request),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
