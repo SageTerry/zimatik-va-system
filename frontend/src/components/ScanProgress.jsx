@@ -30,6 +30,7 @@ export default function ScanProgress() {
     redirectedRef.current = false
     const close = openScanProgressStream(scanId, {
       onMessage: (data) => {
+        setError(null)
         setProgress(data)
         if (data.status === 'COMPLETED' && !redirectedRef.current) {
           redirectedRef.current = true
