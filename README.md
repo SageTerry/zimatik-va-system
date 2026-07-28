@@ -29,7 +29,7 @@ The interface is deliberately understated. Vulnerability data is already stressf
 
 ## Features
 
-- **Multi-tool ingestion** — normalizes findings from Nessus (network/host) and SonarQube (static code analysis) into one consistent schema; ZAP is already modeled as a source (`ToolSource.ZAP`) with a connector planned next (see [Roadmap](#future-roadmap))
+- **Multi-tool ingestion** — normalizes findings from Nessus (network/host), SonarQube (static code analysis), and OWASP ZAP (web application scanning, spider + active scan) into one consistent schema
 - **Three-tier deduplication with confidence scoring** — exact CVE+location matches, cross-host CVE matches (load-balanced infrastructure), and CVE-less matches on shared CWE + title-keyword overlap, each tagged with a confidence score rather than silently merged
 - **PDF technical report generation** — on-demand reports for a whole scan or an arbitrary set of findings, with executive summary, per-finding evidence/remediation write-ups, and an affected-systems appendix
 - **Encrypted credential storage** — Nessus and SonarQube API keys are Fernet-encrypted at rest and never returned by the API once saved, including immediately after a save
@@ -208,7 +208,6 @@ curl "http://localhost:8001/api/v1/findings?severity=CRITICAL&tool=NESSUS&page=1
 ## Future Roadmap
 
 - **Mobile application security scanning** — MobSF and/or Snyk integration for a third finding source alongside Nessus/SonarQube
-- **OWASP ZAP connector** — wire up the already-modeled `ZAP` tool source with an importer, the way Nessus/SonarQube work today
 - **Executive report generation** — a non-technical HTML/PDF summary report for stakeholders, distinct from the existing technical report
 - **Remediation roadmap tracking** — timelines, ownership, and SLA tracking layered on top of `remediation_status`
 - **Webhook/automation support** — scheduled or event-driven scanner imports instead of manually triggering `POST /scans/import`
