@@ -26,6 +26,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 from sqlalchemy import case, func, select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
+from starlette.concurrency import run_in_threadpool
 
 from app.database import get_db, get_session_factory
 from app.models.finding import (
@@ -50,7 +51,12 @@ router = APIRouter(prefix="/api/v1", tags=["findings"])
 
 ZAP_POLL_INTERVAL_SECONDS = 5  # how often _import_zap polls ZAP for active-scan progress
 SSE_POLL_INTERVAL_SECONDS = 2  # how often the progress stream re-reads the DB
-SSE_MAX_STREAM_SECONDS = 1800  # safety cap so a stuck scan doesn't hold a connection open forever
+# Safety cap so a stuck scan doesn't hold a connection open forever. Must cover
+# ZAP's worst case: start_scan() can block up to SPIDER_TIMEOUT (600s) before
+# the active scan even starts, then the active-scan phase can run up to
+# ACTIVE_SCAN_TIMEOUT (1800s) - see app.services.zap_client - so the worst
+# case is 600 + 1800 = 2400s. 2700s (45 min) leaves a comfortable margin.
+SSE_MAX_STREAM_SECONDS = 2700
 
 
 # --- Schemas ------------------------------------------------------------------
@@ -686,11 +692,14 @@ async def _scan_progress_events(scan_id: uuid.UUID, request: Request):
             logger.info("Client disconnected from progress stream for scan_id=%s", scan_id)
             return
 
-        db = session_factory()
-        try:
-            scan = db.get(Scan, scan_id)
-        finally:
-            db.close()
+        def _fetch_scan() -> Scan | None:
+            db = session_factory()
+            try:
+                return db.get(Scan, scan_id)
+            finally:
+                db.close()
+
+        scan = await run_in_threadpool(_fetch_scan)
 
         if scan is None:
             yield f"data: {json.dumps({'scan_id': str(scan_id), 'error': 'scan not found'})}\n\n"
@@ -718,12 +727,17 @@ async def _scan_progress_events(scan_id: uuid.UUID, request: Request):
 
 
 @router.get("/scans/{scan_id}/progress")
-async def stream_scan_progress(scan_id: uuid.UUID, request: Request) -> StreamingResponse:
+async def stream_scan_progress(
+    scan_id: uuid.UUID, request: Request, db: Session = Depends(get_db)
+) -> StreamingResponse:
     """Server-Sent-Events stream of a scan's live progress.
 
     Polls the DB every ``SSE_POLL_INTERVAL_SECONDS`` and closes the stream
     once the scan reaches ``COMPLETED`` or ``FAILED``.
     """
+    if db.get(Scan, scan_id) is None:
+        raise HTTPException(status_code=404, detail=f"Scan {scan_id} not found")
+
     return StreamingResponse(
         _scan_progress_events(scan_id, request),
         media_type="text/event-stream",
