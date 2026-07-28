@@ -30,6 +30,32 @@ export async function getScans() {
   return data
 }
 
+export async function startWebScan(targetUrl) {
+  const scanName = `ZAP scan: ${new URL(targetUrl).hostname} — ${new Date().toLocaleString()}`
+  const { data } = await apiClient.post('/scans/import', {
+    scan_name: scanName,
+    tools: ['ZAP'],
+    scope: targetUrl,
+  })
+  return data
+}
+
+export async function getScan(scanId) {
+  const { data } = await apiClient.get(`/scans/${scanId}`)
+  return data
+}
+
+// Opens an SSE connection to a scan's live progress stream. `onMessage` is
+// called with the parsed payload on every frame; `onError` on a connection
+// error. Returns a cleanup function that closes the connection - call it on
+// unmount or once the scan reaches a terminal status.
+export function openScanProgressStream(scanId, { onMessage, onError } = {}) {
+  const source = new EventSource(`${API_BASE_URL}/scans/${scanId}/progress`)
+  source.onmessage = (event) => onMessage?.(JSON.parse(event.data))
+  source.onerror = (event) => onError?.(event)
+  return () => source.close()
+}
+
 export async function downloadTechnicalReport(payload) {
   return apiClient.post('/reports/technical', payload, { responseType: 'blob' })
 }
