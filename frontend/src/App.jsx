@@ -2,6 +2,9 @@ import { NavLink, Route, Routes } from 'react-router-dom'
 import Dashboard from './components/Dashboard'
 import FindingDetail from './components/FindingDetail'
 import FindingsList from './components/FindingsList'
+import ScanForm from './components/ScanForm'
+import ScanProgress from './components/ScanProgress'
+import ScanResults from './components/ScanResults'
 import SettingsPage from './components/SettingsPage'
 import { ShieldIcon } from './lib/icons'
 
@@ -42,6 +45,7 @@ function App() {
           <nav className="flex items-center gap-1">
             <NavItem to="/">Dashboard</NavItem>
             <NavItem to="/findings">Findings</NavItem>
+            <NavItem to="/scan">New Scan</NavItem>
             <NavItem to="/settings">Settings</NavItem>
           </nav>
         </div>
@@ -52,6 +56,9 @@ function App() {
           <Route path="/" element={<Dashboard />} />
           <Route path="/findings" element={<FindingsList />} />
           <Route path="/findings/:id" element={<FindingDetail />} />
+          <Route path="/scan" element={<ScanForm />} />
+          <Route path="/scan/progress/:scanId" element={<ScanProgress />} />
+          <Route path="/scan-results/:scanId" element={<ScanResults />} />
           <Route path="/settings" element={<SettingsPage />} />
         </Routes>
       </main>
