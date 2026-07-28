@@ -48,6 +48,11 @@ export default function ScanResults() {
           <p className="mt-1 font-body text-ink-2">
             {scan.scope} · {scan.total_findings} finding{scan.total_findings === 1 ? '' : 's'}
           </p>
+          {findings.length < scan.total_findings && (
+            <p className="mt-1 font-body text-xs text-ink-3">
+              Showing the first {findings.length} of {scan.total_findings} findings.
+            </p>
+          )}
         </div>
         <ReportDownloadButton label="Download Technical Report" getPayload={() => ({ scan_id: scanId })} />
       </div>
