@@ -23,6 +23,7 @@ from app.models.credentials import CredentialStore, CredentialTool
 from app.services import crypto
 from app.services.nessus_client import get_nessus_client
 from app.services.sonarqube_client import get_sonarqube_client
+from app.services.zap_client import get_zap_client
 
 logger = logging.getLogger(__name__)
 
@@ -133,8 +134,10 @@ async def test_credential(tool: CredentialTool, db: Session = Depends(get_db)) -
 
     if tool == CredentialTool.NESSUS:
         client = get_nessus_client(db)
-    else:
+    elif tool == CredentialTool.SONARQUBE:
         client = get_sonarqube_client(db)
+    else:
+        client = get_zap_client(db)
 
     success, message = client.test_connection()
     logger.info("Tested %s connection: success=%s", tool.value, success)
