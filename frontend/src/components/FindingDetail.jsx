@@ -2,24 +2,26 @@ import { useEffect, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { getFindingById } from '../api/client'
 import ReportDownloadButton from './ReportDownloadButton'
-import { REMEDIATION_STATUS_STYLES, SEVERITY_STYLES } from '../lib/constants'
+import Card from './Card'
+import Badge from './Badge'
+import { REMEDIATION_STATUS_BADGE, SEVERITY_BADGE } from '../lib/constants'
 
 function Field({ label, value }) {
   if (value === null || value === undefined || value === '') return null
   return (
     <div>
-      <dt className="text-xs font-semibold uppercase tracking-wide text-gray-500">{label}</dt>
-      <dd className="mt-1 text-sm text-gray-200">{value}</dd>
+      <dt className="font-body text-xs uppercase tracking-wide text-ink-3">{label}</dt>
+      <dd className="mt-1 font-body text-sm text-ink">{value}</dd>
     </div>
   )
 }
 
 function Section({ title, children }) {
   return (
-    <div className="rounded-lg border border-gray-800 bg-gray-800/40 p-6">
-      <h2 className="mb-4 text-lg font-semibold text-white">{title}</h2>
+    <Card>
+      <h2 className="mb-4 font-display text-heading text-ink">{title}</h2>
       {children}
-    </div>
+    </Card>
   )
 }
 
@@ -63,7 +65,7 @@ function FindingDetailView({ id }) {
   const backButton = (
     <button
       onClick={() => navigate('/findings')}
-      className="inline-flex items-center gap-1.5 text-sm text-gray-400 transition hover:text-gray-200"
+      className="inline-flex items-center gap-1.5 font-body text-sm text-ink-2 transition-colors hover:text-ink"
     >
       ← Back to findings
     </button>
@@ -73,7 +75,7 @@ function FindingDetailView({ id }) {
     return (
       <div className="space-y-4">
         {backButton}
-        <div className="flex h-64 items-center justify-center text-gray-400">Loading finding…</div>
+        <div className="flex h-64 items-center justify-center font-body text-ink-2">Loading finding…</div>
       </div>
     )
   }
@@ -82,15 +84,12 @@ function FindingDetailView({ id }) {
     return (
       <div className="space-y-4">
         {backButton}
-        <div className="rounded-lg border border-red-500/30 bg-red-500/10 p-6 text-red-300">
+        <div className="radius-a border border-severity-high p-6 font-body text-severity-high">
           {error || 'Finding not found.'}
         </div>
       </div>
     )
   }
-
-  const severityStyle = SEVERITY_STYLES[finding.severity_normalized] ?? SEVERITY_STYLES.INFO
-  const statusStyle = REMEDIATION_STATUS_STYLES[finding.remediation_status] ?? REMEDIATION_STATUS_STYLES.OPEN
 
   return (
     <div className="space-y-6">
@@ -104,29 +103,22 @@ function FindingDetailView({ id }) {
           <ReportDownloadButton
             label="Export Full Scan Report"
             getPayload={() => ({ scan_id: finding.scan_id })}
-            className="inline-flex items-center gap-2 rounded-md border border-gray-700 px-4 py-2 text-sm font-medium text-gray-400 transition hover:border-gray-600 hover:text-gray-200 disabled:cursor-not-allowed disabled:opacity-50"
           />
         </div>
       </div>
 
       <div>
         <div className="flex flex-wrap items-center gap-3">
-          <span
-            className={`inline-flex items-center rounded-full border px-3 py-1 text-xs font-semibold ${severityStyle.bg} ${severityStyle.text} ${severityStyle.border}`}
-          >
+          <Badge severity={SEVERITY_BADGE[finding.severity_normalized] ?? 'info'}>
             {finding.severity_normalized}
-          </span>
-          <span className={`inline-flex items-center rounded-full border px-3 py-1 text-xs font-semibold ${statusStyle}`}>
+          </Badge>
+          <Badge severity={REMEDIATION_STATUS_BADGE[finding.remediation_status] ?? 'info'}>
             {finding.remediation_status.replace(/_/g, ' ')}
-          </span>
-          {finding.is_duplicate && (
-            <span className="inline-flex items-center rounded-full border border-gray-600 bg-gray-700/40 px-3 py-1 text-xs font-semibold text-gray-300">
-              Duplicate
-            </span>
-          )}
+          </Badge>
+          {finding.is_duplicate && <Badge severity="low">Duplicate</Badge>}
         </div>
-        <h1 className="mt-3 text-2xl font-bold text-white">{finding.title}</h1>
-        <p className="mt-1 text-sm text-gray-400">
+        <h1 className="mt-3 font-display text-display text-ink">{finding.title}</h1>
+        <p className="mt-1 font-body text-ink-2">
           {finding.tool_source} · reported {new Date(finding.created_at).toLocaleString()}
         </p>
       </div>
@@ -134,7 +126,7 @@ function FindingDetailView({ id }) {
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
         <div className="space-y-6 lg:col-span-2">
           <Section title="Description">
-            <p className="whitespace-pre-wrap text-sm leading-relaxed text-gray-300">
+            <p className="whitespace-pre-wrap font-body text-sm leading-relaxed text-ink-2">
               {finding.description || 'No description provided.'}
             </p>
           </Section>
@@ -149,11 +141,9 @@ function FindingDetailView({ id }) {
               <Field label="False Positive Risk" value={finding.false_positive_risk} />
               {finding.proof_of_concept && (
                 <div>
-                  <dt className="text-xs font-semibold uppercase tracking-wide text-gray-500">
-                    Proof of Concept
-                  </dt>
+                  <dt className="font-body text-xs uppercase tracking-wide text-ink-3">Proof of Concept</dt>
                   <dd className="mt-1">
-                    <pre className="whitespace-pre-wrap break-words rounded-md bg-gray-950 p-3 text-xs text-gray-300">
+                    <pre className="radius-b whitespace-pre-wrap break-words border border-line bg-sunken p-3 font-body text-xs text-ink-2">
                       {finding.proof_of_concept}
                     </pre>
                   </dd>

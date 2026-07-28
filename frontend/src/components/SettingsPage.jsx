@@ -1,15 +1,14 @@
 import { useEffect, useState } from 'react'
 import { deleteCredentials, getCredentials, saveCredentials, testConnection } from '../api/client'
+import Card from './Card'
+import Badge from './Badge'
+import Button from './Button'
 
 function StatusBadge({ configured }) {
   return configured ? (
-    <span className="inline-flex items-center gap-1 rounded-full border border-green-500/30 bg-green-500/10 px-2.5 py-0.5 text-xs font-semibold text-green-400">
-      ✓ Configured
-    </span>
+    <Badge severity="resolved">✓ Configured</Badge>
   ) : (
-    <span className="inline-flex items-center gap-1 rounded-full border border-gray-600 bg-gray-700/40 px-2.5 py-0.5 text-xs font-semibold text-gray-400">
-      ✗ Not configured
-    </span>
+    <Badge severity="low">✗ Not configured</Badge>
   )
 }
 
@@ -105,20 +104,20 @@ function CredentialCard({ tool, title, description, fields }) {
   const canSave = !saving && fields.every((f) => !f.required || values[f.key])
 
   return (
-    <div className="rounded-lg border border-gray-800 bg-gray-800/40 p-6">
+    <Card>
       <div className="mb-1 flex items-center justify-between gap-3">
-        <h2 className="text-lg font-semibold text-white">{title}</h2>
+        <h2 className="font-display text-heading text-ink">{title}</h2>
         <StatusBadge configured={configured} />
       </div>
-      <p className="mb-5 text-sm text-gray-400">{description}</p>
+      <p className="mb-5 font-body text-sm text-ink-2">{description}</p>
 
       {loading ? (
-        <p className="text-sm text-gray-500">Loading…</p>
+        <p className="font-body text-sm text-ink-3">Loading…</p>
       ) : (
         <form onSubmit={handleSave} className="space-y-4">
           {fields.map((field) => (
             <div key={field.key}>
-              <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-gray-500">
+              <label className="mb-1 block font-body text-xs uppercase tracking-wide text-ink-3">
                 {field.label}
               </label>
               <input
@@ -127,39 +126,35 @@ function CredentialCard({ tool, title, description, fields }) {
                 onChange={(e) => handleChange(field.key, e.target.value)}
                 placeholder={field.placeholder}
                 autoComplete="off"
-                className="w-full rounded-md border border-gray-700 bg-gray-900 px-3 py-2 text-sm text-gray-200 focus:border-blue-500 focus:outline-none"
+                className="radius-b w-full border border-line-strong bg-transparent px-3 py-2 font-body text-sm text-ink focus:border-ink-2 focus:outline-none"
               />
               {field.key !== 'base_url' && configured && (
-                <p className="mt-1 text-xs text-gray-500">Not shown for security - re-enter to update.</p>
+                <p className="mt-1 font-body text-xs text-ink-3">Not shown for security - re-enter to update.</p>
               )}
             </div>
           ))}
 
-          {error && <p className="text-sm text-red-400">{error}</p>}
+          {error && <p className="font-body text-sm text-severity-high">{error}</p>}
 
           <div className="flex flex-wrap items-center gap-3 pt-1">
-            <button
-              type="submit"
-              disabled={!canSave}
-              className="inline-flex items-center gap-2 rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-50"
-            >
+            <Button type="submit" variant="primary" disabled={!canSave}>
               {saving ? 'Saving…' : 'Save Credentials'}
-            </button>
+            </Button>
 
-            <button
+            <Button
               type="button"
+              variant="secondary"
               onClick={handleTest}
               disabled={!configured || testState.status === 'testing'}
-              className="inline-flex items-center gap-2 rounded-md border border-gray-700 px-4 py-2 text-sm font-medium text-gray-200 transition hover:bg-gray-700 disabled:cursor-not-allowed disabled:opacity-50"
             >
               Test Connection
-            </button>
+            </Button>
 
             {configured && (
               <button
                 type="button"
                 onClick={handleDelete}
-                className="ml-auto text-sm text-red-400 transition hover:text-red-300"
+                className="ml-auto font-body text-sm text-severity-high transition-colors hover:text-severity-critical"
               >
                 Clear credentials
               </button>
@@ -168,12 +163,12 @@ function CredentialCard({ tool, title, description, fields }) {
 
           {testState.status !== 'idle' && (
             <p
-              className={`text-sm ${
+              className={`font-body text-sm ${
                 testState.status === 'success'
-                  ? 'text-green-400'
+                  ? 'text-severity-resolved'
                   : testState.status === 'failed'
-                    ? 'text-red-400'
-                    : 'text-gray-400'
+                    ? 'text-severity-high'
+                    : 'text-ink-2'
               }`}
             >
               {testState.status === 'testing' && '⏳ Testing connection…'}
@@ -183,7 +178,7 @@ function CredentialCard({ tool, title, description, fields }) {
           )}
         </form>
       )}
-    </div>
+    </Card>
   )
 }
 
@@ -191,8 +186,8 @@ export default function SettingsPage() {
   return (
     <div className="space-y-8">
       <div>
-        <h1 className="text-2xl font-bold text-white">Settings</h1>
-        <p className="mt-1 text-sm text-gray-400">
+        <h1 className="font-display text-display text-ink">Settings</h1>
+        <p className="mt-1 font-body text-ink-2">
           Configure the scanner credentials VACE uses to import findings from Nessus and SonarQube.
         </p>
       </div>

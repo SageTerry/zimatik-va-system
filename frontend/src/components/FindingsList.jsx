@@ -2,9 +2,13 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { getFindings } from '../api/client'
 import ReportDownloadButton from './ReportDownloadButton'
-import { SEVERITY_ORDER, SEVERITY_STYLES, TOOL_OPTIONS } from '../lib/constants'
+import Badge from './Badge'
+import { REMEDIATION_STATUS_BADGE, SEVERITY_BADGE, SEVERITY_ORDER, TOOL_OPTIONS } from '../lib/constants'
 
 const PAGE_SIZE = 25
+
+const SELECT_CLASSES =
+  'radius-b border border-line-strong bg-transparent px-3 py-2 font-body text-sm text-ink focus:border-ink-2 focus:outline-none'
 
 export default function FindingsList() {
   const navigate = useNavigate()
@@ -92,8 +96,8 @@ export default function FindingsList() {
     <div className="space-y-6">
       <div className="flex flex-wrap items-end justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-bold text-white">Findings</h1>
-          <p className="mt-1 text-sm text-gray-400">
+          <h1 className="font-display text-display text-ink">Findings</h1>
+          <p className="mt-1 font-body text-ink-2">
             {total} total finding{total === 1 ? '' : 's'}
           </p>
         </div>
@@ -109,7 +113,7 @@ export default function FindingsList() {
           <select
             value={severityFilter}
             onChange={(e) => handleSeverityChange(e.target.value)}
-            className="rounded-md border border-gray-700 bg-gray-800 px-3 py-2 text-sm text-gray-200 focus:border-blue-500 focus:outline-none"
+            className={SELECT_CLASSES}
           >
             <option value="">All severities</option>
             {SEVERITY_ORDER.map((severity) => (
@@ -122,7 +126,7 @@ export default function FindingsList() {
           <select
             value={toolFilter}
             onChange={(e) => handleToolChange(e.target.value)}
-            className="rounded-md border border-gray-700 bg-gray-800 px-3 py-2 text-sm text-gray-200 focus:border-blue-500 focus:outline-none"
+            className={SELECT_CLASSES}
           >
             <option value="">All tools</option>
             {TOOL_OPTIONS.map((tool) => (
@@ -135,74 +139,65 @@ export default function FindingsList() {
       </div>
 
       {error && (
-        <div className="rounded-lg border border-red-500/30 bg-red-500/10 p-4 text-red-300">
+        <div className="radius-a border border-severity-high p-4 font-body text-severity-high">
           Failed to load findings: {error}
         </div>
       )}
 
-      <div className="overflow-x-auto rounded-lg border border-gray-800">
-        <table className="min-w-full divide-y divide-gray-800">
-          <thead className="bg-gray-800/60">
+      <div className="radius-a overflow-x-auto border border-line">
+        <table className="min-w-full divide-y divide-line">
+          <thead>
             <tr>
-              <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-400">
-                CVE
-              </th>
-              <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-400">
-                Title
-              </th>
+              <th className="px-4 py-3 text-left font-body text-xs uppercase tracking-wide text-ink-3">CVE</th>
+              <th className="px-4 py-3 text-left font-body text-xs uppercase tracking-wide text-ink-3">Title</th>
               <th
                 onClick={toggleSort}
-                className="cursor-pointer select-none px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-400 hover:text-gray-200"
+                className="cursor-pointer select-none px-4 py-3 text-left font-body text-xs uppercase tracking-wide text-ink-3 hover:text-ink"
               >
                 Severity {sortDir === 'asc' ? '↓' : '↑'}
               </th>
-              <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-400">
-                Tool
-              </th>
-              <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-400">
+              <th className="px-4 py-3 text-left font-body text-xs uppercase tracking-wide text-ink-3">Tool</th>
+              <th className="px-4 py-3 text-left font-body text-xs uppercase tracking-wide text-ink-3">
                 Host / File
               </th>
-              <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-400">
-                Status
-              </th>
+              <th className="px-4 py-3 text-left font-body text-xs uppercase tracking-wide text-ink-3">Status</th>
             </tr>
           </thead>
-          <tbody className="divide-y divide-gray-800 bg-gray-900">
+          <tbody className="divide-y divide-line">
             {loading ? (
               <tr>
-                <td colSpan={6} className="px-4 py-10 text-center text-gray-500">
+                <td colSpan={6} className="px-4 py-10 text-center font-body text-ink-3">
                   Loading findings…
                 </td>
               </tr>
             ) : sortedFindings.length === 0 ? (
               <tr>
-                <td colSpan={6} className="px-4 py-10 text-center text-gray-500">
+                <td colSpan={6} className="px-4 py-10 text-center font-body text-ink-3">
                   No findings match these filters.
                 </td>
               </tr>
             ) : (
               sortedFindings.map((finding) => {
-                const style = SEVERITY_STYLES[finding.severity_normalized] ?? SEVERITY_STYLES.INFO
                 const location = finding.host || finding.code_file || finding.url || '—'
                 return (
                   <tr
                     key={finding.id}
                     onClick={() => navigate(`/findings/${finding.id}`)}
-                    className="cursor-pointer transition hover:bg-gray-800/60"
+                    className="cursor-pointer transition-colors hover:bg-sunken"
                   >
-                    <td className="px-4 py-3 text-sm text-gray-300">{finding.cve_id || '—'}</td>
-                    <td className="max-w-xs truncate px-4 py-3 text-sm text-gray-100">{finding.title}</td>
+                    <td className="px-4 py-3 font-body text-sm text-ink-2">{finding.cve_id || '—'}</td>
+                    <td className="max-w-xs truncate px-4 py-3 font-body text-sm text-ink">{finding.title}</td>
                     <td className="px-4 py-3 text-sm">
-                      <span
-                        className={`inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-semibold ${style.bg} ${style.text} ${style.border}`}
-                      >
+                      <Badge severity={SEVERITY_BADGE[finding.severity_normalized] ?? 'info'}>
                         {finding.severity_normalized}
-                      </span>
+                      </Badge>
                     </td>
-                    <td className="px-4 py-3 text-sm text-gray-300">{finding.tool_source}</td>
-                    <td className="max-w-xs truncate px-4 py-3 text-sm text-gray-300">{location}</td>
-                    <td className="px-4 py-3 text-sm text-gray-300">
-                      {finding.remediation_status.replace(/_/g, ' ')}
+                    <td className="px-4 py-3 font-body text-sm text-ink-2">{finding.tool_source}</td>
+                    <td className="max-w-xs truncate px-4 py-3 font-body text-sm text-ink-2">{location}</td>
+                    <td className="px-4 py-3 text-sm">
+                      <Badge severity={REMEDIATION_STATUS_BADGE[finding.remediation_status] ?? 'info'}>
+                        {finding.remediation_status.replace(/_/g, ' ')}
+                      </Badge>
                     </td>
                   </tr>
                 )
@@ -213,11 +208,11 @@ export default function FindingsList() {
       </div>
 
       {totalPages > 1 && (
-        <div className="flex items-center justify-between text-sm text-gray-400">
+        <div className="flex items-center justify-between font-body text-sm text-ink-2">
           <button
             onClick={() => goToPage(page - 1)}
             disabled={page <= 1}
-            className="rounded-md border border-gray-700 px-3 py-1.5 disabled:cursor-not-allowed disabled:opacity-40"
+            className="radius-c border border-line-strong px-3 py-1.5 transition-colors hover:bg-sunken disabled:cursor-not-allowed disabled:opacity-40"
           >
             Previous
           </button>
@@ -227,7 +222,7 @@ export default function FindingsList() {
           <button
             onClick={() => goToPage(page + 1)}
             disabled={page >= totalPages}
-            className="rounded-md border border-gray-700 px-3 py-1.5 disabled:cursor-not-allowed disabled:opacity-40"
+            className="radius-c border border-line-strong px-3 py-1.5 transition-colors hover:bg-sunken disabled:cursor-not-allowed disabled:opacity-40"
           >
             Next
           </button>

@@ -3,6 +3,7 @@ import Dashboard from './components/Dashboard'
 import FindingDetail from './components/FindingDetail'
 import FindingsList from './components/FindingsList'
 import SettingsPage from './components/SettingsPage'
+import { ShieldIcon } from './lib/icons'
 
 function NavItem({ to, children }) {
   return (
@@ -10,8 +11,10 @@ function NavItem({ to, children }) {
       to={to}
       end={to === '/'}
       className={({ isActive }) =>
-        `rounded-md px-3 py-2 text-sm font-medium transition ${
-          isActive ? 'bg-gray-800 text-white' : 'text-gray-400 hover:bg-gray-800/60 hover:text-gray-200'
+        `radius-c border px-3 py-2 font-body text-base transition-colors ${
+          isActive
+            ? 'border-ink text-ink'
+            : 'border-transparent text-ink-2 hover:border-line hover:text-ink'
         }`
       }
     >
@@ -22,16 +25,16 @@ function NavItem({ to, children }) {
 
 function App() {
   return (
-    <div className="min-h-screen bg-gray-900 text-white">
-      <header className="border-b border-gray-800 bg-gray-950/60">
+    <div className="min-h-screen bg-paper text-ink">
+      <header className="border-b border-line">
         <div className="mx-auto flex max-w-7xl items-center justify-between px-6 py-4">
-          <div className="flex items-center gap-2">
-            <span className="flex h-8 w-8 items-center justify-center rounded-md bg-blue-600 text-sm font-bold text-white">
-              V
+          <div className="flex items-center gap-3">
+            <span className="radius-b flex h-9 w-9 items-center justify-center border border-ink text-ink">
+              <ShieldIcon size={20} strokeWidth={2} />
             </span>
             <div>
-              <p className="text-sm font-bold leading-none text-white">VACE</p>
-              <p className="text-xs leading-none text-gray-500">
+              <p className="font-display text-lg leading-none text-ink">VACE</p>
+              <p className="font-body text-xs leading-none text-ink-3">
                 Vulnerability Assessment Consolidation Engine
               </p>
             </div>

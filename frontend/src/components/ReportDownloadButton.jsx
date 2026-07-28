@@ -3,7 +3,7 @@ import { downloadTechnicalReport } from '../api/client'
 import { defaultReportFilename, filenameFromContentDisposition, triggerFileDownload } from '../lib/download'
 
 const DEFAULT_CLASSES =
-  'inline-flex items-center gap-2 rounded-md border border-gray-700 bg-gray-800 px-4 py-2 text-sm font-medium text-gray-200 transition hover:bg-gray-700 disabled:cursor-not-allowed disabled:opacity-50'
+  'radius-b inline-flex items-center gap-2 border border-line-strong bg-transparent px-4 py-2 font-body text-sm text-ink transition-colors hover:bg-sunken disabled:cursor-not-allowed disabled:opacity-50'
 
 function DownloadIcon() {
   return (
@@ -54,7 +54,7 @@ export default function ReportDownloadButton({ getPayload, label = 'Download Tec
         <DownloadIcon />
         {downloading ? 'Generating…' : label}
       </button>
-      {error && <span className="text-xs text-red-400">{error}</span>}
+      {error && <span className="font-body text-xs text-severity-high">{error}</span>}
     </div>
   )
 }

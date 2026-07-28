@@ -1,40 +1,39 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { Cell, Legend, Pie, PieChart, ResponsiveContainer, Tooltip } from 'recharts'
 import { getFindings, getStats } from '../api/client'
 import ReportDownloadButton from './ReportDownloadButton'
-import { SEVERITY_ORDER, SEVERITY_STYLES } from '../lib/constants'
+import Card from './Card'
+import StatCard from './StatCard'
+import Badge from './Badge'
+import ProgressBar from './ProgressBar'
+import { SEVERITY_BADGE, SEVERITY_ORDER } from '../lib/constants'
+import { RadarIcon, TargetIcon, WarnCircleIcon } from '../lib/icons'
 
 // The report endpoint takes explicit finding_ids rather than "everything" -
 // this pulls the first page at the API's max page size, which comfortably
 // covers this portfolio project's dataset size.
 const REPORT_FINDING_LIMIT = 200
+const RECENT_FINDINGS_LIMIT = 5
 
 async function getAllFindingIdsForReport() {
   const data = await getFindings({ page: 1, page_size: REPORT_FINDING_LIMIT })
   return data.items.length ? { finding_ids: data.items.map((f) => f.id) } : null
 }
 
-function StatCard({ label, value, accent }) {
-  return (
-    <div className="rounded-lg border border-gray-800 bg-gray-800/40 p-6">
-      <p className="text-sm font-medium uppercase tracking-wide text-gray-400">{label}</p>
-      <p className={`mt-2 text-3xl font-bold ${accent ?? 'text-white'}`}>{value}</p>
-    </div>
-  )
-}
-
 export default function Dashboard() {
   const [stats, setStats] = useState(null)
+  const [recentFindings, setRecentFindings] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
 
   useEffect(() => {
     let cancelled = false
 
-    getStats()
-      .then((data) => {
-        if (!cancelled) setStats(data)
+    Promise.all([getStats(), getFindings({ page: 1, page_size: RECENT_FINDINGS_LIMIT })])
+      .then(([statsData, findingsData]) => {
+        if (cancelled) return
+        setStats(statsData)
+        setRecentFindings(findingsData.items)
       })
       .catch((err) => {
         if (!cancelled) setError(err.message || 'Failed to load stats')
@@ -49,31 +48,23 @@ export default function Dashboard() {
   }, [])
 
   if (loading) {
-    return <div className="flex h-64 items-center justify-center text-gray-400">Loading dashboard…</div>
+    return <div className="flex h-64 items-center justify-center font-body text-ink-2">Loading dashboard…</div>
   }
 
   if (error) {
     return (
-      <div className="rounded-lg border border-red-500/30 bg-red-500/10 p-6 text-red-300">
-        Failed to load stats: {error}
-      </div>
+      <Card className="border-severity-high text-severity-high">Failed to load stats: {error}</Card>
     )
   }
 
-  const chartData = SEVERITY_ORDER.map((severity) => ({
-    name: severity,
-    value: stats.by_severity?.[severity] ?? 0,
-    color: SEVERITY_STYLES[severity].chart,
-  })).filter((entry) => entry.value > 0)
-
-  const toolEntries = Object.entries(stats.by_tool ?? {})
+  const totalForBars = stats.total_findings || 1
 
   return (
     <div className="space-y-8">
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-bold text-white">Overview</h1>
-          <p className="mt-1 text-sm text-gray-400">
+          <h1 className="font-display text-display text-ink">Security overview</h1>
+          <p className="mt-1 font-body text-ink-2">
             Consolidated vulnerability posture across all connected scanners.
           </p>
         </div>
@@ -81,91 +72,68 @@ export default function Dashboard() {
       </div>
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-        <StatCard label="Total Findings" value={stats.total_findings} />
-        <StatCard label="Affected Hosts" value={stats.affected_hosts} />
+        <StatCard label="Total Findings" value={stats.total_findings} icon={TargetIcon} />
+        <StatCard label="Affected Hosts" value={stats.affected_hosts} icon={RadarIcon} />
         <StatCard
           label="Critical + High"
           value={(stats.by_severity?.CRITICAL ?? 0) + (stats.by_severity?.HIGH ?? 0)}
-          accent="text-red-400"
+          icon={WarnCircleIcon}
+          accentClassName="text-severity-high"
         />
       </div>
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
-        <div className="rounded-lg border border-gray-800 bg-gray-800/40 p-6 lg:col-span-2">
-          <h2 className="mb-4 text-lg font-semibold text-white">Findings by Severity</h2>
-          {chartData.length === 0 ? (
-            <p className="text-gray-500">No findings recorded yet.</p>
+        <Card className="lg:col-span-2">
+          <h2 className="mb-4 font-display text-heading text-ink">Recent findings</h2>
+          {recentFindings.length === 0 ? (
+            <p className="font-body text-ink-3">No findings recorded yet.</p>
           ) : (
-            <div className="h-72">
-              <ResponsiveContainer width="100%" height="100%">
-                <PieChart>
-                  <Pie
-                    data={chartData}
-                    dataKey="value"
-                    nameKey="name"
-                    innerRadius="55%"
-                    outerRadius="80%"
-                    paddingAngle={2}
+            <ul className="divide-y divide-line">
+              {recentFindings.map((finding) => (
+                <li key={finding.id}>
+                  <Link
+                    to={`/findings/${finding.id}`}
+                    className="flex items-center justify-between gap-4 py-3 transition-colors hover:bg-sunken"
                   >
-                    {chartData.map((entry) => (
-                      <Cell key={entry.name} fill={entry.color} stroke="none" />
-                    ))}
-                  </Pie>
-                  <Tooltip
-                    contentStyle={{ backgroundColor: '#1f2937', border: '1px solid #374151', borderRadius: 8 }}
-                    itemStyle={{ color: '#e5e7eb' }}
-                    labelStyle={{ color: '#9ca3af' }}
-                  />
-                  <Legend
-                    itemSorter={false}
-                    formatter={(value) => <span className="text-gray-300">{value}</span>}
-                  />
-                </PieChart>
-              </ResponsiveContainer>
-            </div>
+                    <span className="truncate font-body text-ink">{finding.title}</span>
+                    <Badge severity={SEVERITY_BADGE[finding.severity_normalized] ?? 'info'}>
+                      {finding.severity_normalized}
+                    </Badge>
+                  </Link>
+                </li>
+              ))}
+            </ul>
           )}
-        </div>
+          <Link
+            to="/findings"
+            className="mt-4 inline-flex items-center gap-1 font-body text-ink-2 underline decoration-line-strong underline-offset-4 hover:text-ink"
+          >
+            View all findings →
+          </Link>
+        </Card>
 
-        <div className="rounded-lg border border-gray-800 bg-gray-800/40 p-6">
-          <h2 className="mb-4 text-lg font-semibold text-white">By Severity</h2>
-          <ul className="space-y-3">
+        <Card>
+          <h2 className="mb-4 font-display text-heading text-ink">Open by severity</h2>
+          <ul className="space-y-4">
             {SEVERITY_ORDER.map((severity) => {
               const count = stats.by_severity?.[severity] ?? 0
-              const style = SEVERITY_STYLES[severity]
               return (
-                <li key={severity} className="flex items-center justify-between">
-                  <span className="flex items-center gap-2 text-sm text-gray-300">
-                    <span className={`h-2.5 w-2.5 rounded-full ${style.dot}`} />
-                    {severity}
-                  </span>
-                  <span className={`font-semibold ${style.text}`}>{count}</span>
+                <li key={severity}>
+                  <div className="mb-1 flex items-center justify-between font-body text-sm text-ink-2">
+                    <span>{severity}</span>
+                    <span className="font-bold text-ink">{count}</span>
+                  </div>
+                  <ProgressBar
+                    value={count}
+                    max={totalForBars}
+                    severity={SEVERITY_BADGE[severity] ?? 'info'}
+                  />
                 </li>
               )
             })}
           </ul>
-
-          {toolEntries.length > 0 && (
-            <>
-              <h2 className="mb-3 mt-6 text-lg font-semibold text-white">By Tool</h2>
-              <ul className="space-y-2">
-                {toolEntries.map(([tool, count]) => (
-                  <li key={tool} className="flex items-center justify-between text-sm">
-                    <span className="text-gray-300">{tool}</span>
-                    <span className="font-semibold text-white">{count}</span>
-                  </li>
-                ))}
-              </ul>
-            </>
-          )}
-        </div>
+        </Card>
       </div>
-
-      <Link
-        to="/findings"
-        className="inline-flex items-center gap-2 rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-blue-500"
-      >
-        View all findings →
-      </Link>
     </div>
   )
 }
