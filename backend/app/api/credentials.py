@@ -36,7 +36,9 @@ router = APIRouter(prefix="/api/v1/credentials", tags=["credentials"])
 class CredentialSaveRequest(BaseModel):
     tool: CredentialTool
     base_url: str = Field(..., min_length=1, max_length=500)
-    api_key: str = Field(..., min_length=1, description="Nessus access key, or SonarQube token.")
+    api_key: Optional[str] = Field(
+        None, description="Nessus access key, SonarQube token, or ZAP API key (ZAP's is optional)."
+    )
     api_secret: Optional[str] = Field(None, description="Nessus secret key. Unused for SonarQube.")
 
 

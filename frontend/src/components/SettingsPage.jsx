@@ -16,6 +16,17 @@ function emptyValues(fields) {
   return Object.fromEntries(fields.map((f) => [f.key, '']))
 }
 
+// FastAPI returns `detail` as a plain string for HTTPException, but as an
+// array of {msg, loc, ...} objects for Pydantic validation errors (422) -
+// rendering that array directly as a JSX child crashes React, so normalize
+// it to a string first.
+function extractErrorMessage(err, fallback) {
+  const detail = err.response?.data?.detail
+  if (typeof detail === 'string') return detail
+  if (Array.isArray(detail)) return detail.map((d) => d.msg || JSON.stringify(d)).join('; ')
+  return err.message || fallback
+}
+
 function CredentialCard({ tool, title, description, fields }) {
   const [values, setValues] = useState(() => emptyValues(fields))
   const [configured, setConfigured] = useState(false)
@@ -67,7 +78,7 @@ function CredentialCard({ tool, title, description, fields }) {
       // doesn't look like the old value is still sitting there.
       setValues((prev) => ({ ...prev, api_key: '', api_secret: '' }))
     } catch (err) {
-      setError(err.response?.data?.detail || err.message || 'Failed to save credentials')
+      setError(extractErrorMessage(err, 'Failed to save credentials'))
     } finally {
       setSaving(false)
     }
@@ -81,7 +92,7 @@ function CredentialCard({ tool, title, description, fields }) {
     } catch (err) {
       setTestState({
         status: 'failed',
-        message: err.response?.data?.detail || err.message || 'Test failed',
+        message: extractErrorMessage(err, 'Test failed'),
       })
     }
   }
