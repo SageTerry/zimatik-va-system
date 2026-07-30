@@ -44,6 +44,8 @@ class ToolSource(str, PyEnum):
     SONARQUBE = "SONARQUBE"
     ZAP = "ZAP"
     MOBSF = "MOBSF"
+    BANDIT = "BANDIT"
+    SAFETY = "SAFETY"
 
 
 class Severity(str, PyEnum):
@@ -64,6 +66,7 @@ class LocationType(str, PyEnum):
     SERVICE = "SERVICE"
     WEB_ENDPOINT = "WEB_ENDPOINT"
     CONFIG = "CONFIG"
+    DEPENDENCY = "DEPENDENCY"
 
 
 class FalsePositiveRisk(str, PyEnum):

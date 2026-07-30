@@ -52,6 +52,20 @@ class Settings(BaseSettings):
     MOBSF_API_KEY: str = ""
     MOBSF_VERIFY_SSL: bool = True
 
+    # sonar-scanner CLI (on-demand local code analysis, distinct from the
+    # SONARQUBE_TOKEN-based SonarQubeClient above, which reads issues from an
+    # already-configured SonarQube project via its Web API).
+    SONARQUBE_SCANNER_PATH: str = "sonar-scanner"  # assumes in PATH, else full path
+    SONARQUBE_PROJECT_KEY: str = "vace-code-scan"
+
+    # Bandit / Safety CLI tools (Python static analysis / dependency audit).
+    BANDIT_PATH: str = "bandit"  # assumes in PATH
+    SAFETY_PATH: str = "safety"  # assumes in PATH
+
+    # Scratch directory where uploaded code archives (ZIPs) are extracted for
+    # analysis by the SonarQube CLI / Bandit / Safety clients.
+    TEMP_EXTRACT_DIR: str = "/tmp/vace-code-extracts"
+
     # Fernet key encrypting scanner credentials at rest in CredentialStore.
     # The default below is fine for local dev but MUST be overridden in any
     # shared/deployed environment - generate one with:
