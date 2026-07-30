@@ -20,6 +20,13 @@ export async function getFindingById(id) {
   return data
 }
 
+export async function updateFindingStatus(findingId, remediationStatus) {
+  const { data } = await apiClient.patch(`/findings/${findingId}`, {
+    remediation_status: remediationStatus,
+  })
+  return data
+}
+
 export async function getStats() {
   const { data } = await apiClient.get('/stats')
   return data

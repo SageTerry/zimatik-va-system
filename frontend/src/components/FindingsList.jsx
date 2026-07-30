@@ -1,14 +1,28 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { getFindings } from '../api/client'
+import { getFindings, updateFindingStatus } from '../api/client'
 import ReportDownloadButton from './ReportDownloadButton'
 import Badge from './Badge'
-import { REMEDIATION_STATUS_BADGE, SEVERITY_BADGE, SEVERITY_ORDER, TOOL_OPTIONS } from '../lib/constants'
+import {
+  REMEDIATION_STATUS_OPTIONS,
+  REMEDIATION_STATUS_SELECT_CLASSES,
+  SEVERITY_BADGE,
+  SEVERITY_ORDER,
+  TOOL_OPTIONS,
+} from '../lib/constants'
 
 const PAGE_SIZE = 25
 
 const SELECT_CLASSES =
   'radius-b border border-line-strong bg-transparent px-3 py-2 font-body text-sm text-ink focus:border-ink-2 focus:outline-none'
+
+function extractErrorMessage(err) {
+  const detail = err.response?.data?.detail
+  if (Array.isArray(detail)) {
+    return detail.map((item) => item.msg || String(item)).join('; ')
+  }
+  return detail || err.message || 'Failed to update status'
+}
 
 export default function FindingsList() {
   const navigate = useNavigate()
@@ -21,10 +35,18 @@ export default function FindingsList() {
   const [sortDir, setSortDir] = useState('asc') // asc = critical first
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
+  const [pendingStatusIds, setPendingStatusIds] = useState(() => new Set())
+  const [statusToast, setStatusToast] = useState(null)
 
   // Guards against an older, slower request overwriting a newer one when
   // filters/page change in quick succession.
   const requestIdRef = useRef(0)
+
+  useEffect(() => {
+    if (!statusToast) return
+    const timer = setTimeout(() => setStatusToast(null), 4000)
+    return () => clearTimeout(timer)
+  }, [statusToast])
 
   const runFetch = useCallback((params) => {
     const requestId = ++requestIdRef.current
@@ -84,6 +106,31 @@ export default function FindingsList() {
 
   function toggleSort() {
     setSortDir((prev) => (prev === 'asc' ? 'desc' : 'asc'))
+  }
+
+  function handleStatusChange(findingId, nextStatus) {
+    const previousStatus = findings.find((f) => f.id === findingId)?.remediation_status
+    if (previousStatus === undefined || previousStatus === nextStatus) return
+
+    setFindings((prev) =>
+      prev.map((f) => (f.id === findingId ? { ...f, remediation_status: nextStatus } : f))
+    )
+    setPendingStatusIds((prev) => new Set(prev).add(findingId))
+
+    updateFindingStatus(findingId, nextStatus)
+      .catch((err) => {
+        setFindings((prev) =>
+          prev.map((f) => (f.id === findingId ? { ...f, remediation_status: previousStatus } : f))
+        )
+        setStatusToast(extractErrorMessage(err))
+      })
+      .finally(() => {
+        setPendingStatusIds((prev) => {
+          const next = new Set(prev)
+          next.delete(findingId)
+          return next
+        })
+      })
   }
 
   const sortedFindings = [...findings].sort((a, b) => {
@@ -194,10 +241,25 @@ export default function FindingsList() {
                     </td>
                     <td className="px-4 py-3 font-body text-sm text-ink-2">{finding.tool_source}</td>
                     <td className="max-w-xs truncate px-4 py-3 font-body text-sm text-ink-2">{location}</td>
-                    <td className="px-4 py-3 text-sm">
-                      <Badge severity={REMEDIATION_STATUS_BADGE[finding.remediation_status] ?? 'info'}>
-                        {finding.remediation_status.replace(/_/g, ' ')}
-                      </Badge>
+                    <td className="px-4 py-3 text-sm" onClick={(e) => e.stopPropagation()}>
+                      <select
+                        value={finding.remediation_status}
+                        disabled={pendingStatusIds.has(finding.id)}
+                        onChange={(e) => handleStatusChange(finding.id, e.target.value)}
+                        className={`radius-c border bg-transparent px-2 py-1 font-body text-xs font-bold uppercase tracking-wide focus:outline-none disabled:opacity-50 ${
+                          REMEDIATION_STATUS_SELECT_CLASSES[finding.remediation_status] ??
+                          REMEDIATION_STATUS_SELECT_CLASSES.OPEN
+                        }`}
+                      >
+                        {REMEDIATION_STATUS_OPTIONS.map((status) => (
+                          <option key={status} value={status}>
+                            {status.replace(/_/g, ' ')}
+                          </option>
+                        ))}
+                      </select>
+                      {pendingStatusIds.has(finding.id) && (
+                        <span className="ml-2 font-body text-xs text-ink-3">Saving…</span>
+                      )}
                     </td>
                   </tr>
                 )
@@ -226,6 +288,12 @@ export default function FindingsList() {
           >
             Next
           </button>
+        </div>
+      )}
+
+      {statusToast && (
+        <div className="fixed bottom-6 right-6 z-50 radius-a border border-severity-high bg-surface px-4 py-3 font-body text-sm text-severity-high shadow-lg">
+          {statusToast}
         </div>
       )}
     </div>
