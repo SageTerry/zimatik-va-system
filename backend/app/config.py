@@ -1,9 +1,11 @@
 """Application configuration, sourced from environment variables / .env file."""
 
+import secrets
 from functools import lru_cache
 from typing import List, Union
 
-from pydantic import field_validator
+import bcrypt
+from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -90,12 +92,36 @@ class Settings(BaseSettings):
     # Changing this key makes previously-stored credentials undecryptable.
     CREDENTIAL_ENCRYPTION_KEY: str = "9IjOrH5C0oVmRVjoQwIJKD2ygdM_CkntKavaAHrT-jc="
 
+    # JWT signing key (app.services.auth_service). Random per-process by
+    # default, which is fine for local dev - just means existing tokens stop
+    # validating across a restart unless SECRET_KEY is pinned via env var.
+    # MUST be set explicitly (and kept stable) in any shared/deployed environment.
+    SECRET_KEY: str = Field(default_factory=lambda: secrets.token_urlsafe(32))
+    TOKEN_EXPIRY_HOURS: int = 24
+
+    # Single local-operator account, seeded into the `users` table at startup
+    # (see app.main's lifespan handler) if that table is empty. DEFAULT_PASSWORD
+    # is the plaintext an operator sets via env var; DEFAULT_PASSWORD_HASH is
+    # derived from it below (never set directly) so nobody has to hand-compute
+    # a bcrypt hash to put in an env var.
+    DEFAULT_USERNAME: str = "admin"
+    DEFAULT_PASSWORD: str = "password"
+    DEFAULT_PASSWORD_HASH: str = ""
+
     @field_validator("CORS_ORIGINS", mode="before")
     @classmethod
     def _split_cors_origins(cls, value: Union[str, List[str]]) -> List[str]:
         if isinstance(value, str):
             return [origin.strip() for origin in value.split(",") if origin.strip()]
         return value
+
+    @model_validator(mode="after")
+    def _derive_default_password_hash(self) -> "Settings":
+        if not self.DEFAULT_PASSWORD_HASH:
+            self.DEFAULT_PASSWORD_HASH = bcrypt.hashpw(
+                self.DEFAULT_PASSWORD.encode("utf-8"), bcrypt.gensalt()
+            ).decode("utf-8")
+        return self
 
 
 @lru_cache

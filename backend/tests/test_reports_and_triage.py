@@ -21,8 +21,14 @@ from app.models.finding import (
     Severity,
     ToolSource,
 )
+from app.services.auth_service import create_jwt_token
 
 NOW = datetime.now(timezone.utc)
+
+# These endpoints now sit behind the week-5 JWT middleware (app.main); any
+# valid token works since these tests don't exercise auth itself, just the
+# already-existing findings/reports behavior.
+AUTH_HEADERS = {"Authorization": f"Bearer {create_jwt_token('test-user')}"}
 
 
 def _scan(db, **overrides):
@@ -53,7 +59,7 @@ def _finding(db, scan, **overrides):
 
 def _client(db_session):
     app.dependency_overrides[get_db] = lambda: db_session
-    client = TestClient(app)
+    client = TestClient(app, headers=AUTH_HEADERS)
     return client
 
 
@@ -87,7 +93,7 @@ def test_patch_updates_remediation_status(db_session):
 
 
 def test_patch_rejects_unknown_status_value():
-    client = TestClient(app)
+    client = TestClient(app, headers=AUTH_HEADERS)
 
     response = client.patch(
         f"/api/v1/findings/{uuid.uuid4()}",
