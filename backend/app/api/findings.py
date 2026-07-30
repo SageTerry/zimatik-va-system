@@ -19,6 +19,7 @@ import time
 import uuid
 from collections import defaultdict
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from fastapi import (
@@ -40,6 +41,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 from starlette.concurrency import run_in_threadpool
 
+from app.config import settings
 from app.database import get_db, get_session_factory
 from app.models.finding import (
     FalsePositiveRisk,
@@ -51,12 +53,22 @@ from app.models.finding import (
     Severity,
     ToolSource,
 )
+from app.services.bandit_client import BanditClient, BanditError
 from app.services.deduplication import apply_dedup
-from app.services.file_utils import cleanup_temp_file, save_uploaded_file
+from app.services.file_utils import (
+    ZipExtractionError,
+    cleanup_extracted_files,
+    cleanup_temp_file,
+    extract_zip,
+    save_uploaded_file,
+)
 from app.services.mobsf_client import MobSFAPIError, get_mobsf_client
 from app.services.nessus_client import get_nessus_client
 from app.services.report_generator import ReportGenerator
+from app.services.safety_client import SafetyClient, SafetyError
 from app.services.sonarqube_client import get_sonarqube_client
+from app.services.sonarqube_cli_client import SonarQubeCliError
+from app.services.sonarqube_cli_client import SonarQubeClient as SonarQubeCliClient
 from app.services.zap_client import ACTIVE_SCAN_TIMEOUT, ZapAPIError, get_zap_client
 
 logger = logging.getLogger(__name__)
@@ -410,6 +422,226 @@ _IMPORTERS: Dict[ToolSource, Callable[[Session, Scan], Tuple[int, int]]] = {
 }
 
 
+# --- Code analysis (Bandit / Safety / SonarQube CLI) --------------------------
+#
+# Unlike the tool-list-driven `/scans/import` + `_IMPORTERS` dispatch above,
+# a code scan always runs all three tools, in a fixed order, against one
+# extracted code directory (stored in `scan.file_path`, the same field MobSF
+# uses for an uploaded APK path) - so it gets its own dedicated start/import
+# functions rather than being folded into `_IMPORTERS`. That also sidesteps a
+# real naming/registration conflict: `ToolSource.SONARQUBE` already maps to
+# `_import_sonarqube` (the REST client, pulling issues from an
+# already-configured project) in `_IMPORTERS` above; the CLI-driven code-scan
+# importer below produces its own SONARQUBE-tagged findings via a completely
+# different client (`sonarqube_cli_client.SonarQubeClient`) and is named
+# `_import_sonarqube_code` to stay distinct rather than overwriting that entry.
+
+
+def start_code_scan(db: Session, code_dir_path: str, project_name: str) -> Scan:
+    """Create a ``Scan`` row for a code-analysis scan of an already-extracted directory.
+
+    Mirrors ``start_mobile_scan``: ``code_dir_path`` (the extracted archive's
+    directory, produced by ``extract_zip``) is stored in ``file_path`` since
+    a code scan's target is a local directory, not a URL/project name.
+    """
+    scan = Scan(
+        name=project_name,
+        scope=project_name,
+        file_path=code_dir_path,
+        status=ScanStatus.PENDING,
+        tool_sources={
+            ToolSource.BANDIT.value.lower(): True,
+            ToolSource.SAFETY.value.lower(): True,
+            ToolSource.SONARQUBE.value.lower(): True,
+        },
+    )
+    db.add(scan)
+    db.commit()
+    db.refresh(scan)
+    return scan
+
+
+def _import_bandit(db: Session, scan: Scan) -> Tuple[int, int]:
+    """Run Bandit against ``scan.file_path`` and persist its findings.
+
+    Covers the 10%->30% span of a code scan's overall progress.
+
+    Returns (imported_count, error_count).
+    """
+    client = BanditClient()
+
+    _update_scan_progress(db, scan, tool_key="bandit", tool_status="scanning", progress=10)
+    try:
+        raw_results = client.analyze(scan.file_path)
+    except BanditError:
+        logger.exception("Bandit scan failed for scan_id=%s", scan.id)
+        _update_scan_progress(db, scan, tool_key="bandit", tool_status="failed", progress=scan.progress)
+        raise
+
+    _update_scan_progress(db, scan, tool_key="bandit", tool_status="processing", progress=25)
+    imported = 0
+    errors = 0
+    for raw_finding in raw_results:
+        try:
+            normalized = client.normalize_finding(raw_finding)
+        except Exception:
+            logger.exception("Failed to normalize Bandit finding for scan_id=%s", scan.id)
+            errors += 1
+            continue
+        finding = Finding(scan_id=scan.id, **normalized)
+        apply_dedup(db, finding)
+        db.add(finding)
+        db.flush()
+        imported += 1
+
+    _update_scan_progress(db, scan, tool_key="bandit", tool_status="completed", progress=30)
+    return imported, errors
+
+
+def _import_safety(db: Session, scan: Scan) -> Tuple[int, int]:
+    """Run Safety against ``scan.file_path`` and persist its findings.
+
+    Covers the 30%->60% span of a code scan's overall progress.
+
+    Returns (imported_count, error_count).
+    """
+    client = SafetyClient()
+
+    _update_scan_progress(db, scan, tool_key="safety", tool_status="scanning", progress=30)
+    try:
+        raw_results = client.analyze(scan.file_path)
+    except SafetyError:
+        logger.exception("Safety scan failed for scan_id=%s", scan.id)
+        _update_scan_progress(db, scan, tool_key="safety", tool_status="failed", progress=scan.progress)
+        raise
+
+    _update_scan_progress(db, scan, tool_key="safety", tool_status="processing", progress=45)
+    imported = 0
+    errors = 0
+    for raw_finding in raw_results:
+        try:
+            normalized = client.normalize_finding(raw_finding)
+        except Exception:
+            logger.exception("Failed to normalize Safety finding for scan_id=%s", scan.id)
+            errors += 1
+            continue
+        finding = Finding(scan_id=scan.id, **normalized)
+        apply_dedup(db, finding)
+        db.add(finding)
+        db.flush()
+        imported += 1
+
+    _update_scan_progress(db, scan, tool_key="safety", tool_status="completed", progress=60)
+    return imported, errors
+
+
+def _import_sonarqube_code(db: Session, scan: Scan) -> Tuple[int, int]:
+    """Run a fresh sonar-scanner analysis against ``scan.file_path`` and persist its findings.
+
+    Covers the 60%->90% span of a code scan's overall progress. Uses a
+    per-scan project key (``SONARQUBE_PROJECT_KEY-<scan.id>``) rather than
+    the bare configured key, so two code scans run back-to-back don't
+    overwrite the same SonarQube-side project and bleed findings from an
+    unrelated prior scan into a new one.
+
+    Returns (imported_count, error_count).
+    """
+    working_dir = Path(settings.TEMP_EXTRACT_DIR) / f"{scan.id}-scannerwork"
+    client = SonarQubeCliClient(
+        settings.SONARQUBE_SCANNER_PATH,
+        working_dir,
+        f"{settings.SONARQUBE_PROJECT_KEY}-{scan.id}",
+    )
+
+    _update_scan_progress(db, scan, tool_key="sonarqube", tool_status="scanning", progress=60)
+    try:
+        raw_issues = client.analyze(scan.file_path)
+    except SonarQubeCliError:
+        logger.exception("SonarQube CLI scan failed for scan_id=%s", scan.id)
+        _update_scan_progress(db, scan, tool_key="sonarqube", tool_status="failed", progress=scan.progress)
+        raise
+    finally:
+        cleanup_extracted_files(working_dir)
+
+    _update_scan_progress(db, scan, tool_key="sonarqube", tool_status="processing", progress=80)
+    imported = 0
+    errors = 0
+    for raw_issue in raw_issues:
+        try:
+            normalized = client.normalize_finding(raw_issue)
+        except Exception:
+            logger.exception("Failed to normalize SonarQube issue for scan_id=%s", scan.id)
+            errors += 1
+            continue
+        finding = Finding(scan_id=scan.id, **normalized)
+        apply_dedup(db, finding)
+        db.add(finding)
+        db.flush()
+        imported += 1
+
+    _update_scan_progress(db, scan, tool_key="sonarqube", tool_status="completed", progress=90)
+    return imported, errors
+
+
+_CODE_IMPORTERS: List[Callable[[Session, Scan], Tuple[int, int]]] = [
+    _import_bandit,
+    _import_safety,
+    _import_sonarqube_code,
+]
+
+
+def _perform_code_import(scan_id: uuid.UUID) -> None:
+    """Background task: run Bandit -> Safety -> SonarQube sequentially against a code scan.
+
+    Mirrors ``_perform_import``'s lifecycle (own DB session, PENDING ->
+    IN_PROGRESS -> COMPLETED/FAILED) but always runs the same fixed sequence
+    rather than a caller-selected tool list, since every code scan runs all
+    three. The extracted code directory (``scan.file_path``) is cleaned up
+    in a ``finally`` block regardless of outcome - a failed tool partway
+    through must not leave the extracted archive on disk.
+    """
+    db = get_session_factory()()
+    try:
+        scan = db.get(Scan, scan_id)
+        if scan is None:
+            logger.error("Scan %s vanished before code import could run", scan_id)
+            return
+
+        scan.status = ScanStatus.IN_PROGRESS
+        scan.started_at = datetime.now(timezone.utc)
+        db.commit()
+
+        total_imported = 0
+        total_errors = 0
+        try:
+            for importer in _CODE_IMPORTERS:
+                imported, errors = importer(db, scan)
+                total_imported += imported
+                total_errors += errors
+            _update_scan_progress(db, scan, tool_key="finalize", tool_status="completed", progress=100)
+        except Exception:
+            db.rollback()
+            logger.exception("Code import failed for scan_id=%s", scan_id)
+            scan.status = ScanStatus.FAILED
+            scan.completed_at = datetime.now(timezone.utc)
+            db.commit()
+            return
+        finally:
+            cleanup_extracted_files(scan.file_path)
+
+        scan.status = ScanStatus.COMPLETED
+        scan.completed_at = datetime.now(timezone.utc)
+        db.commit()
+        logger.info(
+            "Code import completed for scan_id=%s: %d findings imported, %d errors",
+            scan_id,
+            total_imported,
+            total_errors,
+        )
+    finally:
+        db.close()
+
+
 def _perform_import(scan_id: uuid.UUID, tools: List[ToolSource]) -> None:
     """Background task: fetch, normalize, and store findings for ``scan_id``.
 
@@ -530,6 +762,51 @@ async def import_mobile_scan(
 
     background_tasks.add_task(_perform_import, scan.id, [ToolSource.MOBSF])
     logger.info("Queued mobile import for scan_id=%s", scan.id)
+    return ScanImportResponse(scan_id=scan.id, status=scan.status)
+
+
+@router.post(
+    "/scans/import-code",
+    response_model=ScanImportResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+async def import_code_scan(
+    background_tasks: BackgroundTasks,
+    file: UploadFile = File(..., description="Zip archive of a code project to scan."),
+    project_name: str = Form(..., min_length=1, max_length=255),
+    db: Session = Depends(get_db),
+) -> ScanImportResponse:
+    """Upload a code archive and kick off a background Bandit->Safety->SonarQube scan.
+
+    File-upload counterpart to ``import_scans``/``import_mobile_scan``: the
+    archive is extracted to a scratch directory immediately (so the raw zip
+    doesn't need to stick around for the background task), and the extracted
+    directory's path is what the scan actually analyzes.
+    """
+    logger.info("Starting code scan import: project_name=%s filename=%s", project_name, file.filename)
+
+    temp_zip_path = save_uploaded_file(file)
+    extract_dir = Path(settings.TEMP_EXTRACT_DIR) / str(uuid.uuid4())
+    try:
+        extract_zip(temp_zip_path, extract_dir)
+    except ZipExtractionError:
+        cleanup_temp_file(temp_zip_path)
+        cleanup_extracted_files(extract_dir)
+        logger.exception("Failed to extract code archive for project_name=%s", project_name)
+        raise HTTPException(status_code=400, detail="Uploaded file is not a valid zip archive") from None
+    finally:
+        cleanup_temp_file(temp_zip_path)
+
+    try:
+        scan = start_code_scan(db, str(extract_dir), project_name)
+    except SQLAlchemyError:
+        cleanup_extracted_files(extract_dir)
+        db.rollback()
+        logger.exception("Failed to create scan record for project_name=%s", project_name)
+        raise HTTPException(status_code=500, detail="Failed to create scan record") from None
+
+    background_tasks.add_task(_perform_code_import, scan.id)
+    logger.info("Queued code import for scan_id=%s", scan.id)
     return ScanImportResponse(scan_id=scan.id, status=scan.status)
 
 
