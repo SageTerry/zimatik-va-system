@@ -77,6 +77,7 @@ router = APIRouter(prefix="/api/v1", tags=["findings"])
 
 ZAP_POLL_INTERVAL_SECONDS = 5  # how often _import_zap polls ZAP for active-scan progress
 SSE_POLL_INTERVAL_SECONDS = 2  # how often the progress stream re-reads the DB
+TOP_CRITICAL_LIMIT = 10  # how many CRITICAL findings the executive report highlights
 # Safety cap so a stuck scan doesn't hold a connection open forever. Must cover
 # ZAP's worst case: start_scan() can block up to SPIDER_TIMEOUT (600s) before
 # the active scan even starts, then the active-scan phase can run up to
@@ -196,6 +197,32 @@ class TechnicalReportRequest(BaseModel):
         if not self.scan_id and not self.finding_ids:
             raise ValueError("Provide either scan_id or finding_ids.")
         return self
+
+
+class FindingUpdateRequest(BaseModel):
+    remediation_status: RemediationStatus
+
+
+class ExecutiveReportResponse(BaseModel):
+    scan_metadata: Dict[str, Any]
+    findings_by_severity: Dict[str, int]
+    findings_by_status: Dict[str, int]
+    findings_by_tool: Dict[str, int]
+    timeline: List[Dict[str, Any]]
+    top_critical: List[FindingRead]
+    all_findings: List[FindingRead]
+
+
+def _severity_rank_case():
+    """CASE expression ranking CRITICAL first, INFO last, for ORDER BY clauses."""
+    return case(
+        (Finding.severity_normalized == Severity.CRITICAL, 0),
+        (Finding.severity_normalized == Severity.HIGH, 1),
+        (Finding.severity_normalized == Severity.MEDIUM, 2),
+        (Finding.severity_normalized == Severity.LOW, 3),
+        (Finding.severity_normalized == Severity.INFO, 4),
+        else_=5,
+    )
 
 
 # --- Import orchestration (runs in a background task, own DB session) --------
@@ -831,14 +858,7 @@ async def list_findings(
     if scan_id is not None:
         filters.append(Finding.scan_id == scan_id)
 
-    severity_rank = case(
-        (Finding.severity_normalized == Severity.CRITICAL, 0),
-        (Finding.severity_normalized == Severity.HIGH, 1),
-        (Finding.severity_normalized == Severity.MEDIUM, 2),
-        (Finding.severity_normalized == Severity.LOW, 3),
-        (Finding.severity_normalized == Severity.INFO, 4),
-        else_=5,
-    )
+    severity_rank = _severity_rank_case()
 
     try:
         total = db.execute(
@@ -892,6 +912,37 @@ async def get_finding(finding_id: uuid.UUID, db: Session = Depends(get_db)) -> F
         logger.warning("Finding not found: finding_id=%s", finding_id)
         raise HTTPException(status_code=404, detail=f"Finding {finding_id} not found")
 
+    return FindingRead.model_validate(finding)
+
+
+@router.patch("/findings/{finding_id}", response_model=FindingRead)
+async def update_finding(
+    finding_id: uuid.UUID,
+    payload: FindingUpdateRequest,
+    db: Session = Depends(get_db),
+) -> FindingRead:
+    """Update a finding's remediation status as it moves through triage."""
+    try:
+        finding = db.get(Finding, finding_id)
+    except SQLAlchemyError:
+        logger.exception("Failed to fetch finding_id=%s for update", finding_id)
+        raise HTTPException(status_code=500, detail="Failed to retrieve finding") from None
+
+    if finding is None:
+        raise HTTPException(status_code=404, detail=f"Finding {finding_id} not found")
+
+    finding.remediation_status = payload.remediation_status
+    try:
+        db.commit()
+        db.refresh(finding)
+    except SQLAlchemyError:
+        db.rollback()
+        logger.exception("Failed to update finding_id=%s", finding_id)
+        raise HTTPException(status_code=500, detail="Failed to update finding") from None
+
+    logger.info(
+        "Updated finding_id=%s remediation_status=%s", finding_id, payload.remediation_status.value
+    )
     return FindingRead.model_validate(finding)
 
 
@@ -999,6 +1050,106 @@ async def get_stats(db: Session = Depends(get_db)) -> StatsResponse:
         by_severity={severity.value: count for severity, count in severity_rows},
         by_tool={tool.value: count for tool, count in tool_rows},
         affected_hosts=affected_hosts,
+    )
+
+
+@router.get("/reports/executive", response_model=ExecutiveReportResponse)
+async def get_executive_report(
+    scan_id: uuid.UUID = Query(..., description="Scan to report on."),
+    db: Session = Depends(get_db),
+) -> ExecutiveReportResponse:
+    """Executive-level breakdown of one scan: severity/status/tool counts, a
+    per-day discovery timeline, the top CRITICAL findings, and the full
+    finding list (capped at ``settings.REPORT_MAX_FINDINGS``).
+    """
+    try:
+        scan = db.get(Scan, scan_id)
+
+        severity_rows = db.execute(
+            select(Finding.severity_normalized, func.count(Finding.id))
+            .where(Finding.scan_id == scan_id)
+            .group_by(Finding.severity_normalized)
+        ).all()
+        status_rows = db.execute(
+            select(Finding.remediation_status, func.count(Finding.id))
+            .where(Finding.scan_id == scan_id)
+            .group_by(Finding.remediation_status)
+        ).all()
+        tool_rows = db.execute(
+            select(Finding.tool_source, func.count(Finding.id))
+            .where(Finding.scan_id == scan_id)
+            .group_by(Finding.tool_source)
+        ).all()
+        timeline_rows = db.execute(
+            select(
+                func.date(Finding.created_at),
+                Finding.severity_normalized,
+                func.count(Finding.id),
+            )
+            .where(Finding.scan_id == scan_id)
+            .group_by(func.date(Finding.created_at), Finding.severity_normalized)
+        ).all()
+
+        severity_rank = _severity_rank_case()
+        top_critical = (
+            db.execute(
+                select(Finding)
+                .where(Finding.scan_id == scan_id, Finding.severity_normalized == Severity.CRITICAL)
+                .order_by(Finding.created_at.desc())
+                .limit(TOP_CRITICAL_LIMIT)
+            )
+            .scalars()
+            .all()
+        )
+        all_findings = (
+            db.execute(
+                select(Finding)
+                .where(Finding.scan_id == scan_id)
+                .order_by(severity_rank, Finding.created_at.desc())
+                .limit(settings.REPORT_MAX_FINDINGS)
+            )
+            .scalars()
+            .all()
+        )
+    except SQLAlchemyError:
+        logger.exception("Failed to build executive report for scan_id=%s", scan_id)
+        raise HTTPException(status_code=500, detail="Failed to generate executive report") from None
+
+    if scan is None:
+        raise HTTPException(status_code=404, detail=f"Scan {scan_id} not found")
+
+    timeline_by_date: Dict[str, Dict[str, int]] = defaultdict(dict)
+    for day, severity, count in timeline_rows:
+        timeline_by_date[str(day)][severity.value.lower()] = count
+    timeline = [
+        {
+            "date": day,
+            **{severity.value.lower(): counts.get(severity.value.lower(), 0) for severity in Severity},
+        }
+        for day, counts in sorted(timeline_by_date.items())
+    ]
+
+    scan_metadata = {
+        "id": scan.id,
+        "name": scan.name,
+        "scope": scan.scope,
+        "status": scan.status.value,
+        "started_at": scan.started_at,
+        "completed_at": scan.completed_at,
+        "created_at": scan.created_at,
+    }
+
+    logger.info(
+        "Generated executive report for scan_id=%s findings=%d", scan_id, len(all_findings)
+    )
+    return ExecutiveReportResponse(
+        scan_metadata=scan_metadata,
+        findings_by_severity={severity.value: count for severity, count in severity_rows},
+        findings_by_status={status_.value: count for status_, count in status_rows},
+        findings_by_tool={tool.value: count for tool, count in tool_rows},
+        timeline=timeline,
+        top_critical=[FindingRead.model_validate(f) for f in top_critical],
+        all_findings=[FindingRead.model_validate(f) for f in all_findings],
     )
 
 

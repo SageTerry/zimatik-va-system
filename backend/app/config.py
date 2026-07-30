@@ -78,6 +78,11 @@ class Settings(BaseSettings):
     # Scratch directory where repos are cloned for a webhook-triggered scan.
     TEMP_CLONE_DIR: str = "/tmp/vace-code-clones"
 
+    # Cap on how many findings the executive report's "all_findings" section
+    # returns, so a scan with thousands of findings doesn't blow up the
+    # response payload.
+    REPORT_MAX_FINDINGS: int = 500
+
     # Fernet key encrypting scanner credentials at rest in CredentialStore.
     # The default below is fine for local dev but MUST be overridden in any
     # shared/deployed environment - generate one with:
