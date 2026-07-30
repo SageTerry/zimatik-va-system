@@ -4,6 +4,7 @@ import Dashboard from './components/Dashboard'
 import FindingDetail from './components/FindingDetail'
 import FindingsList from './components/FindingsList'
 import MobileScanForm from './components/MobileScanForm'
+import ReportsPage from './components/ReportsPage'
 import ScanForm from './components/ScanForm'
 import ScanProgress from './components/ScanProgress'
 import ScanResults from './components/ScanResults'
@@ -65,6 +66,7 @@ function App() {
           <Route path="/scan/code" element={<CodeScanForm />} />
           <Route path="/scan/progress/:scanId" element={<ScanProgress />} />
           <Route path="/scan-results/:scanId" element={<ScanResults />} />
+          <Route path="/reports/:scan_id" element={<ReportsPage />} />
           <Route path="/settings" element={<SettingsPage />} />
         </Routes>
       </main>

@@ -54,7 +54,15 @@ export default function ScanResults() {
             </p>
           )}
         </div>
-        <ReportDownloadButton label="Download Technical Report" getPayload={() => ({ scan_id: scanId })} />
+        <div className="flex flex-wrap items-start gap-3">
+          <Link
+            to={`/reports/${scanId}`}
+            className="radius-b inline-flex items-center gap-2 border border-line-strong bg-transparent px-4 py-2 font-body text-sm text-ink transition-colors hover:bg-sunken"
+          >
+            View Executive Report
+          </Link>
+          <ReportDownloadButton label="Download Technical Report" getPayload={() => ({ scan_id: scanId })} />
+        </div>
       </div>
 
       <div className="radius-a overflow-x-auto border border-line">

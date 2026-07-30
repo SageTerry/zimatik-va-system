@@ -27,6 +27,11 @@ export async function updateFindingStatus(findingId, remediationStatus) {
   return data
 }
 
+export async function getExecutiveReport(scanId) {
+  const { data } = await apiClient.get('/reports/executive', { params: { scan_id: scanId } })
+  return data
+}
+
 export async function getStats() {
   const { data } = await apiClient.get('/stats')
   return data
