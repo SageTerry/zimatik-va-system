@@ -66,6 +66,18 @@ class Settings(BaseSettings):
     # analysis by the SonarQube CLI / Bandit / Safety clients.
     TEMP_EXTRACT_DIR: str = "/tmp/vace-code-extracts"
 
+    # GitHub webhook / API integration (CI/CD auto-scan on push).
+    # GITHUB_WEBHOOK_SECRET verifies the HMAC-SHA256 signature GitHub sends
+    # with every webhook delivery; GITHUB_TOKEN authenticates cloning
+    # private repos and posting PR comments via the REST API. Both are
+    # blank by default (no webhook configured) rather than failing startup,
+    # matching how the other scanner credentials above default to "".
+    GITHUB_WEBHOOK_SECRET: str = ""
+    GITHUB_TOKEN: str = ""
+
+    # Scratch directory where repos are cloned for a webhook-triggered scan.
+    TEMP_CLONE_DIR: str = "/tmp/vace-code-clones"
+
     # Fernet key encrypting scanner credentials at rest in CredentialStore.
     # The default below is fine for local dev but MUST be overridden in any
     # shared/deployed environment - generate one with:
