@@ -54,6 +54,20 @@ export async function startMobileScan(apkFile, appName) {
   return data
 }
 
+export async function startCodeScan(zipFile, projectName) {
+  const formData = new FormData()
+  formData.append('file', zipFile)
+  formData.append('project_name', projectName)
+  // apiClient defaults to a JSON content-type, which would make axios
+  // JSON-stringify the FormData instead of sending it as multipart. Clearing
+  // it here lets the browser set the correct multipart/form-data header
+  // (including the boundary) itself.
+  const { data } = await apiClient.post('/scans/import-code', formData, {
+    headers: { 'Content-Type': undefined },
+  })
+  return data
+}
+
 export async function getScan(scanId) {
   const { data } = await apiClient.get(`/scans/${scanId}`)
   return data

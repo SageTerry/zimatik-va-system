@@ -1,4 +1,5 @@
 import { NavLink, Route, Routes } from 'react-router-dom'
+import CodeScanForm from './components/CodeScanForm'
 import Dashboard from './components/Dashboard'
 import FindingDetail from './components/FindingDetail'
 import FindingsList from './components/FindingsList'
@@ -48,6 +49,7 @@ function App() {
             <NavItem to="/findings">Findings</NavItem>
             <NavItem to="/scan">New Scan</NavItem>
             <NavItem to="/scan/mobile">Scan Mobile App</NavItem>
+            <NavItem to="/scan/code">Scan Code</NavItem>
             <NavItem to="/settings">Settings</NavItem>
           </nav>
         </div>
@@ -60,6 +62,7 @@ function App() {
           <Route path="/findings/:id" element={<FindingDetail />} />
           <Route path="/scan" element={<ScanForm />} />
           <Route path="/scan/mobile" element={<MobileScanForm />} />
+          <Route path="/scan/code" element={<CodeScanForm />} />
           <Route path="/scan/progress/:scanId" element={<ScanProgress />} />
           <Route path="/scan-results/:scanId" element={<ScanResults />} />
           <Route path="/settings" element={<SettingsPage />} />
