@@ -43,6 +43,7 @@ class ToolSource(str, PyEnum):
     NESSUS = "NESSUS"
     SONARQUBE = "SONARQUBE"
     ZAP = "ZAP"
+    MOBSF = "MOBSF"
 
 
 class Severity(str, PyEnum):
@@ -105,6 +106,10 @@ class Scan(Base):
         String(255),
         nullable=False,
         doc='Target of the scan, e.g. "192.168.1.0/24" or a project name.',
+    )
+    file_path: Mapped[str | None] = mapped_column(
+        String(1000),
+        doc="Server-side path to an uploaded scan artifact, e.g. an APK for a MobSF mobile scan.",
     )
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

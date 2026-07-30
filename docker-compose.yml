@@ -46,5 +46,20 @@ services:
       retries: 10
       start_period: 30s
 
+  mobsf:
+    image: opensecurity/mobile-security-framework-mobsf:latest
+    container_name: vace-mobsf
+    ports:
+      # Host-side 8001, not MobSF's native 8000, since 8000 is commonly
+      # already bound by other local dev tooling; the container still
+      # listens on its native 8000 internally.
+      - "8001:8000"
+    healthcheck:
+      test: [ "CMD-SHELL", "curl -sf http://localhost:8000/ -o /dev/null || exit 1" ]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+      start_period: 60s
+
 volumes:
   postgres_data:

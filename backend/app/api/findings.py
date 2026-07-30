@@ -1,9 +1,10 @@
 """REST API for VACE findings: triggering scanner imports and querying results.
 
-Import (``POST /scans/import``) is fire-and-forget: the ``Scan`` row is
-created and returned immediately with ``PENDING`` status, while the actual
-Nessus/SonarQube fetch-and-normalize work runs in a background task against
-its own DB session. The read endpoints (``/findings``, ``/scans``,
+Import (``POST /scans/import`` for Nessus/SonarQube/ZAP, ``POST
+/scans/import-mobile`` for a MobSF mobile-app upload) is fire-and-forget:
+the ``Scan`` row is created and returned immediately with ``PENDING``
+status, while the actual fetch-and-normalize work runs in a background task
+against its own DB session. The read endpoints (``/findings``, ``/scans``,
 ``/stats``) are plain synchronous-session reads exposed as async routes, per
 FastAPI's standard pattern of running sync dependencies in a threadpool.
 """
@@ -20,7 +21,18 @@ from collections import defaultdict
 from datetime import datetime, timezone
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request, status
+from fastapi import (
+    APIRouter,
+    BackgroundTasks,
+    Depends,
+    File,
+    Form,
+    HTTPException,
+    Query,
+    Request,
+    UploadFile,
+    status,
+)
 from fastapi.responses import Response, StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from sqlalchemy import case, func, select
@@ -40,6 +52,8 @@ from app.models.finding import (
     ToolSource,
 )
 from app.services.deduplication import apply_dedup
+from app.services.file_utils import cleanup_temp_file, save_uploaded_file
+from app.services.mobsf_client import MobSFAPIError, get_mobsf_client
 from app.services.nessus_client import get_nessus_client
 from app.services.report_generator import ReportGenerator
 from app.services.sonarqube_client import get_sonarqube_client
@@ -241,12 +255,18 @@ def _import_sonarqube(db: Session, scan: Scan) -> Tuple[int, int]:
     return imported, errors
 
 
-def _update_scan_progress(db: Session, scan: Scan, *, tool_status: str, progress: int) -> None:
+def _update_scan_progress(
+    db: Session, scan: Scan, *, tool_key: str, tool_status: str, progress: int
+) -> None:
     """Persist a live progress update so ``GET /scans/{id}/progress`` (reading
     via its own, separate DB session) can observe it without waiting for the
     whole import to finish.
+
+    ``tool_key`` (e.g. ``"zap"``, ``"mobsf"``) keys the update within
+    ``tool_statuses`` so a scan running more than one live-progress tool at
+    once doesn't have one tool's status clobber another's.
     """
-    scan.tool_statuses = {**scan.tool_statuses, "zap": tool_status}
+    scan.tool_statuses = {**scan.tool_statuses, tool_key: tool_status}
     scan.progress = progress
     db.commit()
 
@@ -267,20 +287,20 @@ def _import_zap(db: Session, scan: Scan) -> Tuple[int, int]:
     client = get_zap_client(db)
     target_url = scan.scope
 
-    _update_scan_progress(db, scan, tool_status="spidering", progress=5)
+    _update_scan_progress(db, scan, tool_key="zap", tool_status="spidering", progress=5)
     try:
         zap_scan_id = client.start_scan(target_url)
     except ZapAPIError:
         logger.exception("ZAP scan failed to start for scan_id=%s target=%s", scan.id, target_url)
-        _update_scan_progress(db, scan, tool_status="failed", progress=scan.progress)
+        _update_scan_progress(db, scan, tool_key="zap", tool_status="failed", progress=scan.progress)
         raise
 
-    _update_scan_progress(db, scan, tool_status="scanning", progress=20)
+    _update_scan_progress(db, scan, tool_key="zap", tool_status="scanning", progress=20)
     deadline = time.monotonic() + ACTIVE_SCAN_TIMEOUT
     while True:
         status_str, percent = client.get_progress(zap_scan_id)
         overall = 20 + round(percent * 0.75)
-        _update_scan_progress(db, scan, tool_status="scanning", progress=overall)
+        _update_scan_progress(db, scan, tool_key="zap", tool_status="scanning", progress=overall)
         if status_str == "COMPLETED":
             break
         if time.monotonic() >= deadline:
@@ -290,11 +310,11 @@ def _import_zap(db: Session, scan: Scan) -> Tuple[int, int]:
                 scan.id,
                 ACTIVE_SCAN_TIMEOUT,
             )
-            _update_scan_progress(db, scan, tool_status="failed", progress=overall)
+            _update_scan_progress(db, scan, tool_key="zap", tool_status="failed", progress=overall)
             raise ZapAPIError(f"ZAP active scan did not finish within {ACTIVE_SCAN_TIMEOUT}s")
         time.sleep(ZAP_POLL_INTERVAL_SECONDS)
 
-    _update_scan_progress(db, scan, tool_status="processing", progress=95)
+    _update_scan_progress(db, scan, tool_key="zap", tool_status="processing", progress=95)
     imported = 0
     errors = 0
     for raw_alert in client.get_findings(zap_scan_id):
@@ -310,7 +330,75 @@ def _import_zap(db: Session, scan: Scan) -> Tuple[int, int]:
         db.flush()
         imported += 1
 
-    _update_scan_progress(db, scan, tool_status="completed", progress=100)
+    _update_scan_progress(db, scan, tool_key="zap", tool_status="completed", progress=100)
+    return imported, errors
+
+
+def start_mobile_scan(db: Session, apk_file_path: str, app_name: str) -> Scan:
+    """Create a ``Scan`` row for a mobile (MobSF) scan of an already-uploaded APK.
+
+    Mirrors what ``import_scans`` does inline for the JSON-body (Nessus/
+    SonarQube/ZAP) case, but takes the uploaded file's server-side path
+    directly rather than a ``scope`` string, since a mobile scan's target is
+    a binary, not a URL/project name.
+    """
+    scan = Scan(
+        name=app_name,
+        scope=app_name,
+        file_path=apk_file_path,
+        status=ScanStatus.PENDING,
+        tool_sources={ToolSource.MOBSF.value.lower(): True},
+    )
+    db.add(scan)
+    db.commit()
+    db.refresh(scan)
+    return scan
+
+
+def _import_mobsf(db: Session, scan: Scan) -> Tuple[int, int]:
+    """Upload ``scan.file_path`` to MobSF, run static analysis, and persist its findings.
+
+    Unlike ZAP, MobSF's scan call blocks until static analysis is complete
+    rather than exposing a live percentage to poll, so progress here is
+    staged at fixed checkpoints rather than driven by repeated
+    ``get_progress`` polling: uploading (10%) -> scanning (50%, the blocking
+    call itself) -> processing (90%, normalizing findings) -> completed
+    (100%). The uploaded APK is deleted as soon as MobSF has its own copy,
+    since nothing after that point needs the local file.
+
+    Returns (imported_count, error_count).
+    """
+    client = get_mobsf_client(db)
+
+    _update_scan_progress(db, scan, tool_key="mobsf", tool_status="uploading", progress=10)
+    try:
+        mobsf_scan_id = client.upload_and_scan(scan.file_path, scan.scope)
+    except MobSFAPIError:
+        logger.exception("MobSF scan failed to start for scan_id=%s file=%s", scan.id, scan.file_path)
+        _update_scan_progress(db, scan, tool_key="mobsf", tool_status="failed", progress=scan.progress)
+        raise
+    finally:
+        cleanup_temp_file(scan.file_path)
+
+    _update_scan_progress(db, scan, tool_key="mobsf", tool_status="scanning", progress=50)
+    _update_scan_progress(db, scan, tool_key="mobsf", tool_status="processing", progress=90)
+
+    imported = 0
+    errors = 0
+    for raw_finding in client.get_findings(mobsf_scan_id):
+        try:
+            normalized = client.normalize_finding(raw_finding)
+        except Exception:
+            logger.exception("Failed to normalize MobSF finding for scan_id=%s", scan.id)
+            errors += 1
+            continue
+        finding = Finding(scan_id=scan.id, **normalized)
+        apply_dedup(db, finding)
+        db.add(finding)
+        db.flush()
+        imported += 1
+
+    _update_scan_progress(db, scan, tool_key="mobsf", tool_status="completed", progress=100)
     return imported, errors
 
 
@@ -318,6 +406,7 @@ _IMPORTERS: Dict[ToolSource, Callable[[Session, Scan], Tuple[int, int]]] = {
     ToolSource.NESSUS: _import_nessus,
     ToolSource.SONARQUBE: _import_sonarqube,
     ToolSource.ZAP: _import_zap,
+    ToolSource.MOBSF: _import_mobsf,
 }
 
 
@@ -408,6 +497,39 @@ async def import_scans(
 
     background_tasks.add_task(_perform_import, scan.id, tools)
     logger.info("Queued import for scan_id=%s", scan.id)
+    return ScanImportResponse(scan_id=scan.id, status=scan.status)
+
+
+@router.post(
+    "/scans/import-mobile",
+    response_model=ScanImportResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+async def import_mobile_scan(
+    background_tasks: BackgroundTasks,
+    file: UploadFile = File(..., description="Mobile app binary to scan, e.g. an APK."),
+    app_name: str = Form(..., min_length=1, max_length=255),
+    db: Session = Depends(get_db),
+) -> ScanImportResponse:
+    """Upload a mobile app binary and kick off a background MobSF static-analysis scan.
+
+    File-upload counterpart to ``import_scans``: since MobSF scans a
+    binary rather than a URL/project name already known to VACE, the
+    target has to arrive as multipart form data instead of a JSON body.
+    """
+    logger.info("Starting mobile scan import: app_name=%s filename=%s", app_name, file.filename)
+
+    temp_path = save_uploaded_file(file)
+    try:
+        scan = start_mobile_scan(db, str(temp_path), app_name)
+    except SQLAlchemyError:
+        cleanup_temp_file(temp_path)
+        db.rollback()
+        logger.exception("Failed to create scan record for app_name=%s", app_name)
+        raise HTTPException(status_code=500, detail="Failed to create scan record") from None
+
+    background_tasks.add_task(_perform_import, scan.id, [ToolSource.MOBSF])
+    logger.info("Queued mobile import for scan_id=%s", scan.id)
     return ScanImportResponse(scan_id=scan.id, status=scan.status)
 
 
