@@ -141,3 +141,22 @@ export function CheckmarkIcon(props) {
     </IconBase>
   )
 }
+
+export function UploadIcon(props) {
+  return (
+    <IconBase {...props}>
+      <path d="M12 15.5V4" />
+      <path d="M7.5 8.5L12 4l4.5 4.5" />
+      <path d="M4 15.5v3A1.5 1.5 0 0 0 5.5 20h13a1.5 1.5 0 0 0 1.5-1.5v-3" />
+    </IconBase>
+  )
+}
+
+export function SmartphoneIcon(props) {
+  return (
+    <IconBase {...props}>
+      <rect x="7" y="3" width="10" height="18" rx="1.5" />
+      <path d="M11 18h2" />
+    </IconBase>
+  )
+}

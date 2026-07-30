@@ -46,9 +46,9 @@ class Settings(BaseSettings):
     ZAP_API_KEY: str = ""
     ZAP_VERIFY_SSL: bool = True
 
-    # MobSF API (mobile app static analysis). Host port 8001 in docker-compose
+    # MobSF API (mobile app static analysis). Host port 8002 in docker-compose
     # maps to the container's native 8000 - see docker-compose.yml for why.
-    MOBSF_URL: str = "http://localhost:8001"
+    MOBSF_URL: str = "http://localhost:8002"
     MOBSF_API_KEY: str = ""
     MOBSF_VERIFY_SSL: bool = True
 
