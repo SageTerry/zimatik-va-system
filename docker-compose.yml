@@ -8,6 +8,7 @@ services:
       POSTGRES_DB: vace_db
       POSTGRES_USER: vace_user
       POSTGRES_PASSWORD: vace_password
+      POSTGRES_INITDB_ARGS: "-c max_connections=200"
     ports:
       - "5432:5432"
     volumes:
@@ -32,19 +33,43 @@ services:
   zap:
     image: ghcr.io/zaproxy/zaproxy:stable
     container_name: vace-zap
+    # -Xmx caps the JVM heap so ZAP fails predictably (a Java OutOfMemoryError
+    # inside the scan) instead of silently growing until the host/WSL2 VM's
+    # OOM killer kills the whole container mid-scan (observed twice: exit
+    # code 137, no in-container error at all). mem_limit below gives the
+    # container a bit of headroom over the heap for JVM metaspace/threads,
+    # and - more importantly - keeps a kill scoped to this container instead
+    # of the OOM killer picking another one sharing the VM's memory.
     command: >
-      zap.sh -daemon -host 0.0.0.0 -port 8090
+      zap.sh -daemon -host 0.0.0.0 -port 8091 -Xmx1536m
       -config api.disablekey=true
       -config api.addrs.addr.name=.*
       -config api.addrs.addr.regex=true
+      -config autoupdate.checkOnStart=false
+      -config autoupdate.checkAddonUpdates=false
+      -config autoupdate.installAddonUpdates=false
+      -config autoupdate.installScannerRules=false
+    mem_limit: 2g
     ports:
-      - "8090:8090"
+      # Host and container port both 8091 (not ZAP's usual default 8090,
+      # which is commonly bound by other local ZAP containers e.g. other
+      # projects' own stacks): ZAP's API/proxy handler routes requests by
+      # matching the incoming Host header against its own configured
+      # host:port, so a host-side port that differs from what ZAP is
+      # actually bound to internally makes it misidentify normal API calls
+      # as proxy-forward requests and fail them - keeping them identical
+      # avoids that entirely rather than fighting Docker's NAT translation.
+      - "8091:8091"
     healthcheck:
-      test: [ "CMD-SHELL", "curl -sf http://localhost:8090/JSON/core/view/version/ -o /dev/null || exit 1" ]
+      test: [ "CMD-SHELL", "curl -sf http://localhost:8091/JSON/core/view/version/ -o /dev/null || exit 1" ]
       interval: 15s
       timeout: 10s
       retries: 10
-      start_period: 30s
+      # ZAP's telemetry/callhome addon makes outbound calls on startup that
+      # can hang for several minutes in network-restricted environments
+      # before falling through - this stays "starting" (not falsely
+      # "unhealthy") through that delay rather than failing fast.
+      start_period: 600s
 
   mobsf:
     image: opensecurity/mobile-security-framework-mobsf:latest

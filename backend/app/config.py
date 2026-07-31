@@ -1,7 +1,9 @@
 """Application configuration, sourced from environment variables / .env file."""
 
 import secrets
+import tempfile
 from functools import lru_cache
+from pathlib import Path
 from typing import List, Union
 
 import bcrypt
@@ -23,6 +25,11 @@ class Settings(BaseSettings):
     DEBUG: bool = False
     LOG_LEVEL: str = "INFO"
 
+    # Every ERROR-and-above log record (any module) is additionally written
+    # here (rotated, see app.main), on top of the normal stdout stream - so a
+    # failure is still on disk after the console output is gone/scrolled past.
+    ERROR_LOG_FILE: str = "logs/errors.log"
+
     # CORS - comma-separated list of allowed origins in the environment
     CORS_ORIGINS: List[str] = ["http://localhost:3000", "http://localhost:5173"]
 
@@ -43,8 +50,11 @@ class Settings(BaseSettings):
     SONARQUBE_TOKEN: str = ""
     SONARQUBE_VERIFY_SSL: bool = True
 
-    # OWASP ZAP API (daemon mode; api_key optional, off by default in docker-compose)
-    ZAP_URL: str = "http://localhost:8090"
+    # OWASP ZAP API (daemon mode; api_key optional, off by default in docker-compose).
+    # Host port 8091 in docker-compose maps to the container's native 8090 -
+    # see docker-compose.yml for why (another local ZAP container commonly
+    # holds 8090).
+    ZAP_URL: str = "http://localhost:8091"
     ZAP_API_KEY: str = ""
     ZAP_VERIFY_SSL: bool = True
 
@@ -65,8 +75,16 @@ class Settings(BaseSettings):
     SAFETY_PATH: str = "safety"  # assumes in PATH
 
     # Scratch directory where uploaded code archives (ZIPs) are extracted for
-    # analysis by the SonarQube CLI / Bandit / Safety clients.
-    TEMP_EXTRACT_DIR: str = "/tmp/vace-code-extracts"
+    # analysis by the SonarQube CLI / Bandit / Safety clients. A hardcoded
+    # "/tmp/..." default is Windows-hostile: Path("/tmp/...") there has no
+    # drive letter, so it resolves relative to whatever the *current*
+    # process's working drive happens to be - fine within this process, but
+    # inconsistent for the SonarQube CLI subprocess (launched with a
+    # different cwd), which silently nested its working directory inside the
+    # scanned project instead. tempfile.gettempdir() matches how
+    # file_utils._UPLOAD_DIR already handles the equivalent upload scratch
+    # dir, and is unambiguous on every platform.
+    TEMP_EXTRACT_DIR: str = str(Path(tempfile.gettempdir()) / "vace-code-extracts")
 
     # GitHub webhook / API integration (CI/CD auto-scan on push).
     # GITHUB_WEBHOOK_SECRET verifies the HMAC-SHA256 signature GitHub sends
