@@ -229,6 +229,20 @@ def _severity_rank_case():
     )
 
 
+def _threat_status_rank_case():
+    """CASE expression ranking ACTIVELY_EXPLOITED first, UNKNOWN last, for
+    ORDER BY clauses - mirrors the priority order in
+    ThreatIntelClient.get_threat_status.
+    """
+    return case(
+        (Finding.threat_status == ThreatStatus.ACTIVELY_EXPLOITED, 0),
+        (Finding.threat_status == ThreatStatus.POC_AVAILABLE, 1),
+        (Finding.threat_status == ThreatStatus.PATCH_AVAILABLE, 2),
+        (Finding.threat_status == ThreatStatus.MONITOR, 3),
+        else_=4,
+    )
+
+
 # --- Import orchestration (runs in a background task, own DB session) --------
 
 
@@ -913,11 +927,26 @@ async def list_findings(
     tool: Optional[ToolSource] = Query(None, description="Filter by source tool."),
     host: Optional[str] = Query(None, description="Filter by exact host match."),
     scan_id: Optional[uuid.UUID] = Query(None, description="Filter by scan."),
+    threat_status: Optional[ThreatStatus] = Query(
+        None, description="Filter by CISA KEV / NVD-derived threat status."
+    ),
+    sort: Optional[str] = Query(
+        None,
+        description=(
+            "Sort order. Default (omitted) sorts CRITICAL-severity-first. "
+            "'threat_status' sorts ACTIVELY_EXPLOITED-first instead, for the "
+            "dashboard's threat-intel widget."
+        ),
+    ),
     page: int = Query(1, ge=1),
     page_size: int = Query(50, ge=1, le=200),
     db: Session = Depends(get_db),
 ) -> FindingListResponse:
-    """List findings, filterable by severity/tool/host/scan, sorted CRITICAL-first."""
+    """List findings, filterable by severity/tool/host/scan/threat_status.
+
+    Sorted CRITICAL-severity-first by default, or ACTIVELY_EXPLOITED-first
+    when ``sort=threat_status`` is passed.
+    """
     filters = []
     if severity is not None:
         filters.append(Finding.severity_normalized == severity)
@@ -927,8 +956,10 @@ async def list_findings(
         filters.append(Finding.host == host)
     if scan_id is not None:
         filters.append(Finding.scan_id == scan_id)
+    if threat_status is not None:
+        filters.append(Finding.threat_status == threat_status)
 
-    severity_rank = _severity_rank_case()
+    order_by_rank = _threat_status_rank_case() if sort == "threat_status" else _severity_rank_case()
 
     try:
         total = db.execute(
@@ -939,7 +970,7 @@ async def list_findings(
             db.execute(
                 select(Finding)
                 .where(*filters)
-                .order_by(severity_rank, Finding.created_at.desc())
+                .order_by(order_by_rank, Finding.created_at.desc())
                 .offset((page - 1) * page_size)
                 .limit(page_size)
             )
@@ -951,11 +982,13 @@ async def list_findings(
         raise HTTPException(status_code=500, detail="Failed to retrieve findings") from None
 
     logger.info(
-        "Listed findings: severity=%s tool=%s host=%s scan_id=%s page=%d returned=%d total=%d",
+        "Listed findings: severity=%s tool=%s host=%s scan_id=%s threat_status=%s sort=%s page=%d returned=%d total=%d",
         severity,
         tool,
         host,
         scan_id,
+        threat_status,
+        sort,
         page,
         len(rows),
         total,
