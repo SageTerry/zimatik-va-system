@@ -20,8 +20,12 @@ catch {
 }
 
 # Start Docker Compose
+# Explicit service list rather than a bare "up -d": the postgres service is
+# commented out in docker-compose.yml (host port 5432 sits in a persistent
+# Windows dynamic port-exclusion range on this machine) in favor of
+# vace-postgres-verify, the same image/data on port 15432 instead.
 Write-Host "[*] Starting Docker containers..." -ForegroundColor Yellow
-docker-compose up -d
+docker-compose up -d vace-postgres-verify sonarqube-db sonarqube redis zap mobsf
 Write-Host "[+] Docker containers started" -ForegroundColor Green
 
 # Wait for services to be healthy (max 30 seconds)
@@ -30,7 +34,7 @@ $maxWait = 30
 $waited = 0
 while ($waited -lt $maxWait) {
     try {
-        $response = curl.exe -s http://localhost:5432 2>&1
+        $response = curl.exe -s http://localhost:15432 2>&1
         break
     }
     catch {
@@ -83,7 +87,7 @@ Write-Host "[+] VACE is running!" -ForegroundColor Green
 Write-Host ""
 Write-Host "Frontend: http://localhost:5173" -ForegroundColor Cyan
 Write-Host "Backend API: http://localhost:8001" -ForegroundColor Cyan
-Write-Host "Docker: postgres, redis, zap, mobsf, sonarqube" -ForegroundColor Cyan
+Write-Host "Docker: vace-postgres-verify (port 15432), redis, zap, mobsf, sonarqube" -ForegroundColor Cyan
 Write-Host ""
 Write-Host "Login with: admin / password" -ForegroundColor Cyan
 Write-Host ""

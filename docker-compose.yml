@@ -1,16 +1,42 @@
 version: '3.8'
 
 services:
-  postgres:
+  # Disabled: host port 5432 sits inside a persistent Windows/Hyper-V dynamic
+  # TCP port-exclusion range on this machine, so Docker can't bind it
+  # ("ports are not available ... forbidden by its access permissions").
+  # vace-postgres-verify below is the same image/credentials/volume (so it's
+  # the same real data), just published on 15432 instead - re-enable this
+  # and drop vace-postgres-verify once 5432 frees up.
+  # postgres:
+  #   image: postgres:16-alpine
+  #   container_name: vace-postgres
+  #   environment:
+  #     POSTGRES_DB: vace_db
+  #     POSTGRES_USER: vace_user
+  #     POSTGRES_PASSWORD: vace_password
+  #     POSTGRES_INITDB_ARGS: "-c max_connections=200"
+  #   ports:
+  #     - "5432:5432"
+  #   volumes:
+  #     - postgres_data:/var/lib/postgresql/data
+  #   healthcheck:
+  #     test: [ "CMD-SHELL", "pg_isready -U vace_user" ]
+  #     interval: 10s
+  #     timeout: 5s
+  #     retries: 5
+
+  vace-postgres-verify:
     image: postgres:16-alpine
-    container_name: vace-postgres
+    container_name: vace-postgres-verify
     environment:
       POSTGRES_DB: vace_db
       POSTGRES_USER: vace_user
       POSTGRES_PASSWORD: vace_password
       POSTGRES_INITDB_ARGS: "-c max_connections=200"
     ports:
-      - "5432:5432"
+      - "15432:5432"
+    # Same volume the postgres service above uses, so this is the same real
+    # data - not a fresh/empty database.
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
