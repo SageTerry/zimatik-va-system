@@ -88,6 +88,21 @@ class RemediationStatus(str, PyEnum):
     WONT_FIX = "WONT_FIX"
 
 
+class ThreatStatus(str, PyEnum):
+    """Real-world exploitation status for a finding's CVE, from
+    ``app.services.threat_intel_client``. UNKNOWN covers both "not
+    enriched yet" (the default) and "enrichment was attempted but the
+    CISA/NVD lookups failed" - both cases mean "no threat-intel signal",
+    not "enrichment ran and found nothing".
+    """
+
+    ACTIVELY_EXPLOITED = "ACTIVELY_EXPLOITED"
+    POC_AVAILABLE = "POC_AVAILABLE"
+    PATCH_AVAILABLE = "PATCH_AVAILABLE"
+    MONITOR = "MONITOR"
+    UNKNOWN = "UNKNOWN"
+
+
 class Scan(Base):
     """A single assessment run that ingests results from one or more tools.
 
@@ -176,6 +191,7 @@ class Finding(Base):
         Index("ix_findings_severity_normalized", "severity_normalized"),
         Index("ix_findings_tool_source", "tool_source"),
         Index("ix_findings_scan_id", "scan_id"),
+        Index("ix_findings_threat_status", "threat_status"),
         CheckConstraint(
             "cvss_v3 IS NULL OR cvss_v3 BETWEEN 0 AND 10", name="ck_findings_cvss_v3_range"
         ),
@@ -280,6 +296,18 @@ class Finding(Base):
         Text, doc="Analyst notes on business impact, e.g. asset criticality."
     )
     tags: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
+
+    # --- Threat intelligence (app.services.threat_intel_client) ------------------
+    threat_status: Mapped[ThreatStatus] = mapped_column(
+        Enum(ThreatStatus, name="threat_status"),
+        nullable=False,
+        default=ThreatStatus.UNKNOWN,
+        doc="CISA KEV / NVD-derived exploitation status; UNKNOWN until enriched.",
+    )
+    threat_intel_enriched_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        doc="When threat_status was last (re)computed; null if never enriched.",
+    )
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()

@@ -15,23 +15,37 @@ import {
   XAxis,
   YAxis,
 } from 'recharts'
-import { getExecutiveReport } from '../api/client'
+import { getExecutiveReport, updateFindingStatus } from '../api/client'
 import Card from './Card'
 import StatCard from './StatCard'
 import Badge from './Badge'
-import { REMEDIATION_STATUS_BADGE, SEVERITY_BADGE, SEVERITY_ORDER } from '../lib/constants'
-import { TargetIcon, WarnCircleIcon, CheckCircleIcon } from '../lib/icons'
+import {
+  REMEDIATION_STATUS_BADGE,
+  REMEDIATION_STATUS_OPTIONS,
+  REMEDIATION_STATUS_SELECT_CLASSES,
+  SEVERITY_BADGE,
+  SEVERITY_ORDER,
+} from '../lib/constants'
+import { ChevronLeftIcon, TargetIcon, WarnCircleIcon, CheckCircleIcon } from '../lib/icons'
+
+function extractErrorMessage(err) {
+  const detail = err.response?.data?.detail
+  if (Array.isArray(detail)) {
+    return detail.map((item) => item.msg || String(item)).join('; ')
+  }
+  return detail || err.message || 'Failed to update status'
+}
 
 // Mirrors the `severity` color tokens in tailwind.config.js. Recharts fills
 // are plain SVG attributes, so they need real hex values rather than
 // Tailwind classes.
 const SEVERITY_HEX = {
-  critical: '#c0442f',
-  high: '#c2192b',
-  medium: '#d8842a',
-  low: '#7d746a',
-  resolved: '#5c8a4e',
-  info: '#4b7a8a',
+  critical: '#B91424',
+  high: '#D91C1C',
+  medium: '#D97706',
+  low: '#64748B',
+  resolved: '#15803D',
+  info: '#1857A4',
 }
 
 const STATUS_ORDER = ['OPEN', 'IN_PROGRESS', 'REMEDIATED', 'RISK_ACCEPTED', 'FALSE_POSITIVE', 'WONT_FIX']
@@ -61,6 +75,14 @@ export default function ReportsPage() {
   const [loading, setLoading] = useState(true)
   const [notFound, setNotFound] = useState(false)
   const [error, setError] = useState(null)
+  const [pendingStatusIds, setPendingStatusIds] = useState(() => new Set())
+  const [statusToast, setStatusToast] = useState(null)
+
+  useEffect(() => {
+    if (!statusToast) return
+    const timer = setTimeout(() => setStatusToast(null), 4000)
+    return () => clearTimeout(timer)
+  }, [statusToast])
 
   useEffect(() => {
     let cancelled = false
@@ -90,6 +112,36 @@ export default function ReportsPage() {
     }
   }, [scanId])
 
+  function updateFindingInReport(findingId, nextStatus) {
+    setReport((prev) => {
+      if (!prev) return prev
+      const updateList = (list) =>
+        list.map((f) => (f.id === findingId ? { ...f, remediation_status: nextStatus } : f))
+      return { ...prev, all_findings: updateList(prev.all_findings), top_critical: updateList(prev.top_critical) }
+    })
+  }
+
+  function handleStatusChange(findingId, nextStatus) {
+    const previousStatus = report.all_findings.find((f) => f.id === findingId)?.remediation_status
+    if (previousStatus === undefined || previousStatus === nextStatus) return
+
+    updateFindingInReport(findingId, nextStatus)
+    setPendingStatusIds((prev) => new Set(prev).add(findingId))
+
+    updateFindingStatus(findingId, nextStatus)
+      .catch((err) => {
+        updateFindingInReport(findingId, previousStatus)
+        setStatusToast(extractErrorMessage(err))
+      })
+      .finally(() => {
+        setPendingStatusIds((prev) => {
+          const next = new Set(prev)
+          next.delete(findingId)
+          return next
+        })
+      })
+  }
+
   if (loading) {
     return <div className="flex h-64 items-center justify-center font-body text-ink-2">Loading report…</div>
   }
@@ -113,9 +165,10 @@ export default function ReportsPage() {
         </p>
         <Link
           to="/findings"
-          className="mt-4 inline-flex items-center gap-1 font-body text-ink-2 underline decoration-line-strong underline-offset-4 hover:text-ink"
+          className="mt-4 inline-flex items-center gap-1 font-body text-sm font-semibold text-brand hover:text-brand-dark"
         >
-          ← Back to findings
+          <ChevronLeftIcon size={16} strokeWidth={2.5} />
+          Back to findings
         </Link>
       </Card>
     )
@@ -170,7 +223,7 @@ export default function ReportsPage() {
         <button
           type="button"
           onClick={() => window.print()}
-          className="no-print radius-b inline-flex items-center gap-2 border border-line-strong bg-transparent px-4 py-2 font-body text-sm text-ink transition-colors hover:bg-sunken"
+          className="no-print radius-b inline-flex cursor-pointer items-center gap-2 border border-brand bg-brand px-4 py-2.5 font-body text-sm font-semibold text-white shadow-sm transition-colors hover:bg-brand-dark"
         >
           Export to PDF
         </button>
@@ -212,7 +265,7 @@ export default function ReportsPage() {
           <h2 className="mb-4 font-display text-heading text-ink">Findings by status</h2>
           <ResponsiveContainer width="100%" height={280}>
             <BarChart data={statusChartData}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#c9c1ae" />
+              <CartesianGrid strokeDasharray="3 3" stroke="#E5E8EE" />
               <XAxis dataKey="name" tick={{ fontSize: 12 }} interval={0} angle={-20} textAnchor="end" height={60} />
               <YAxis allowDecimals={false} />
               <Tooltip />
@@ -231,7 +284,7 @@ export default function ReportsPage() {
         {showTimeline ? (
           <ResponsiveContainer width="100%" height={280}>
             <LineChart data={report.timeline}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#c9c1ae" />
+              <CartesianGrid strokeDasharray="3 3" stroke="#E5E8EE" />
               <XAxis dataKey="date" tick={{ fontSize: 12 }} />
               <YAxis allowDecimals={false} />
               <Tooltip />
@@ -284,14 +337,14 @@ export default function ReportsPage() {
             </p>
           )}
         </div>
-        <div className="overflow-x-auto">
+        <div className="radius-b overflow-x-auto border border-line">
           <table className="min-w-full divide-y divide-line">
             <thead>
-              <tr>
-                <th className="px-4 py-3 text-left font-body text-xs uppercase tracking-wide text-ink-3">Title</th>
-                <th className="px-4 py-3 text-left font-body text-xs uppercase tracking-wide text-ink-3">Severity</th>
-                <th className="px-4 py-3 text-left font-body text-xs uppercase tracking-wide text-ink-3">Tool</th>
-                <th className="px-4 py-3 text-left font-body text-xs uppercase tracking-wide text-ink-3">Status</th>
+              <tr className="bg-sunken">
+                <th className="px-4 py-3 text-left font-body text-xs font-semibold uppercase tracking-wide text-ink-3">Title</th>
+                <th className="px-4 py-3 text-left font-body text-xs font-semibold uppercase tracking-wide text-ink-3">Severity</th>
+                <th className="px-4 py-3 text-left font-body text-xs font-semibold uppercase tracking-wide text-ink-3">Tool</th>
+                <th className="px-4 py-3 text-left font-body text-xs font-semibold uppercase tracking-wide text-ink-3">Status</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-line">
@@ -309,9 +362,21 @@ export default function ReportsPage() {
                   </td>
                   <td className="px-4 py-3 font-body text-sm text-ink-2">{finding.tool_source}</td>
                   <td className="px-4 py-3 text-sm">
-                    <Badge severity={REMEDIATION_STATUS_BADGE[finding.remediation_status] ?? 'info'}>
-                      {finding.remediation_status.replace(/_/g, ' ')}
-                    </Badge>
+                    <select
+                      value={finding.remediation_status}
+                      disabled={pendingStatusIds.has(finding.id)}
+                      onChange={(e) => handleStatusChange(finding.id, e.target.value)}
+                      className={`cursor-pointer rounded-full border px-3 py-1 font-body text-xs font-semibold uppercase tracking-wide focus:outline-none disabled:cursor-not-allowed disabled:opacity-50 ${
+                        REMEDIATION_STATUS_SELECT_CLASSES[finding.remediation_status] ??
+                        REMEDIATION_STATUS_SELECT_CLASSES.OPEN
+                      }`}
+                    >
+                      {REMEDIATION_STATUS_OPTIONS.map((status) => (
+                        <option key={status} value={status}>
+                          {status.replace(/_/g, ' ')}
+                        </option>
+                      ))}
+                    </select>
                   </td>
                 </tr>
               ))}
@@ -319,6 +384,12 @@ export default function ReportsPage() {
           </table>
         </div>
       </Card>
+
+      {statusToast && (
+        <div className="no-print fixed bottom-6 right-6 z-50 radius-a border border-severity-high bg-surface px-4 py-3 font-body text-sm text-severity-high shadow-lg">
+          {statusToast}
+        </div>
+      )}
     </div>
   )
 }

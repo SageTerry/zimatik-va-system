@@ -17,6 +17,7 @@ the caller drives staged progress for a ZAP scan.
 from __future__ import annotations
 
 import logging
+import re
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, TypedDict, Union
 
@@ -48,6 +49,12 @@ _SEVERITY_MAP: Dict[str, Severity] = {
 }
 
 _SECURE_STATUSES = {"good", "secure", "normal", "signature", "signatureorsystem"}
+
+# MobSF's `cwe` field is sometimes a bare number ("276"), sometimes already
+# "CWE-276", and sometimes a full description ("CWE-276: Incorrect Default
+# Permissions") - Finding.cwe_id is VARCHAR(20), so only the identifier
+# itself is ever kept.
+_CWE_ID_RE = re.compile(r"CWE-\d+", re.IGNORECASE)
 
 
 class MobSFAPIError(Exception):
@@ -217,15 +224,16 @@ class MobSFClient:
             files = entry.get("files") or {}
             if files:
                 for file_path, file_meta in files.items():
-                    raw_findings.append(
-                        {
-                            "_category": "code",
-                            "rule_id": rule_id,
-                            "file_path": file_path,
-                            "line": file_meta.get("line"),
-                            **metadata,
-                        }
-                    )
+                    for line in self._parse_code_finding_lines(file_meta):
+                        raw_findings.append(
+                            {
+                                "_category": "code",
+                                "rule_id": rule_id,
+                                "file_path": file_path,
+                                "line": line,
+                                **metadata,
+                            }
+                        )
             else:
                 raw_findings.append({"_category": "code", "rule_id": rule_id, **metadata})
 
@@ -242,6 +250,26 @@ class MobSFClient:
             raw_findings.append({"_category": "permission", "permission": permission_name, **perm_meta})
 
         return raw_findings
+
+    @staticmethod
+    def _parse_code_finding_lines(file_meta: Any) -> List[Optional[int]]:
+        """Extract the line number(s) a code finding's ``files`` entry points at.
+
+        MobSF 4.x reports this as a comma-separated string of line numbers
+        per file (e.g. ``"163,196,274"``) rather than a structured dict, even
+        though ``files`` itself is a dict keyed by file path - one raw
+        finding is emitted per line so each flagged location is individually
+        trackable instead of only ever keeping the first. Falls back to a
+        single ``None`` line for any other shape rather than raising, since
+        the exact format isn't documented and has changed across MobSF
+        versions before.
+        """
+        if isinstance(file_meta, str):
+            lines = [int(part) for part in file_meta.split(",") if part.strip().isdigit()]
+            return lines or [None]
+        if isinstance(file_meta, dict):
+            return [file_meta.get("line")]
+        return [None]
 
     def normalize_finding(self, raw: Dict[str, Any]) -> NormalizedFinding:
         """Convert one raw finding dict (from ``get_findings``) into VACE's unified schema.
@@ -318,7 +346,10 @@ class MobSFClient:
         text = str(raw_cwe).strip()
         if not text or text == "0":
             return None
-        return text if text.upper().startswith("CWE-") else f"CWE-{text}"
+        match = _CWE_ID_RE.search(text)
+        if match:
+            return match.group(0).upper()
+        return f"CWE-{text}" if text.isdigit() else None
 
 
 def get_mobsf_client(db: Session) -> MobSFClient:

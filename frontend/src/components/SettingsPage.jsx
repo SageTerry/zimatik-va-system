@@ -3,12 +3,19 @@ import { deleteCredentials, getCredentials, saveCredentials, testConnection } fr
 import Card from './Card'
 import Badge from './Badge'
 import Button from './Button'
+import { CheckCircleIcon, XCircleIcon } from '../lib/icons'
 
 function StatusBadge({ configured }) {
   return configured ? (
-    <Badge severity="resolved">✓ Configured</Badge>
+    <Badge severity="resolved">
+      <CheckCircleIcon size={13} strokeWidth={2.5} />
+      Configured
+    </Badge>
   ) : (
-    <Badge severity="low">✗ Not configured</Badge>
+    <Badge severity="low">
+      <XCircleIcon size={13} strokeWidth={2.5} />
+      Not configured
+    </Badge>
   )
 }
 
@@ -128,7 +135,7 @@ function CredentialCard({ tool, title, description, fields }) {
         <form onSubmit={handleSave} className="space-y-4">
           {fields.map((field) => (
             <div key={field.key}>
-              <label className="mb-1 block font-body text-xs uppercase tracking-wide text-ink-3">
+              <label className="mb-1 block font-body text-xs font-semibold uppercase tracking-wide text-ink-3">
                 {field.label}
               </label>
               <input
@@ -137,7 +144,7 @@ function CredentialCard({ tool, title, description, fields }) {
                 onChange={(e) => handleChange(field.key, e.target.value)}
                 placeholder={field.placeholder}
                 autoComplete="off"
-                className="radius-b w-full border border-line-strong bg-transparent px-3 py-2 font-body text-sm text-ink focus:border-ink-2 focus:outline-none"
+                className="radius-b w-full border border-line-strong bg-surface px-3.5 py-2.5 font-body text-sm text-ink transition-colors focus:border-brand focus:outline-none focus:ring-2 focus:ring-brand/15"
               />
               {field.key !== 'base_url' && configured && (
                 <p className="mt-1 font-body text-xs text-ink-3">Not shown for security - re-enter to update.</p>
@@ -165,7 +172,7 @@ function CredentialCard({ tool, title, description, fields }) {
               <button
                 type="button"
                 onClick={handleDelete}
-                className="ml-auto font-body text-sm text-severity-high transition-colors hover:text-severity-critical"
+                className="ml-auto cursor-pointer font-body text-sm font-semibold text-severity-high transition-colors hover:text-severity-critical"
               >
                 Clear credentials
               </button>
@@ -174,7 +181,7 @@ function CredentialCard({ tool, title, description, fields }) {
 
           {testState.status !== 'idle' && (
             <p
-              className={`font-body text-sm ${
+              className={`flex items-center gap-1.5 font-body text-sm ${
                 testState.status === 'success'
                   ? 'text-severity-resolved'
                   : testState.status === 'failed'
@@ -182,9 +189,19 @@ function CredentialCard({ tool, title, description, fields }) {
                     : 'text-ink-2'
               }`}
             >
-              {testState.status === 'testing' && '⏳ Testing connection…'}
-              {testState.status === 'success' && `✓ ${testState.message}`}
-              {testState.status === 'failed' && `✗ ${testState.message}`}
+              {testState.status === 'testing' && 'Testing connection…'}
+              {testState.status === 'success' && (
+                <>
+                  <CheckCircleIcon size={16} strokeWidth={2.5} />
+                  {testState.message}
+                </>
+              )}
+              {testState.status === 'failed' && (
+                <>
+                  <XCircleIcon size={16} strokeWidth={2.5} />
+                  {testState.message}
+                </>
+              )}
             </p>
           )}
         </form>

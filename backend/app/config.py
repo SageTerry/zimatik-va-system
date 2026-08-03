@@ -103,6 +103,22 @@ class Settings(BaseSettings):
     # response payload.
     REPORT_MAX_FINDINGS: int = 500
 
+    # Threat intelligence enrichment (app.services.threat_intel_client) - both
+    # feeds are public, read-only, and need no credentials. Responses are
+    # cached in Redis (via requests-cache) since the CISA KEV catalog is
+    # ~1000 entries fetched whole, and NVD is a single rate-limited API
+    # queried per distinct CVE across every scan.
+    CISA_KEV_URL: str = (
+        "https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json"
+    )
+    NVD_API_URL: str = "https://services.nvd.nist.gov/rest/json/cves/2.0"
+    # Two separate TTLs, not one: the KEV catalog is refetched as a whole
+    # feed and changes often enough to re-check daily, while a single CVE's
+    # NVD enrichment (CVSS, references) is effectively static and safe to
+    # cache far longer.
+    THREAT_INTEL_CISA_CACHE_HOURS: int = 24
+    THREAT_INTEL_NVD_CACHE_HOURS: int = 168  # 7 days
+
     # Fernet key encrypting scanner credentials at rest in CredentialStore.
     # The default below is fine for local dev but MUST be overridden in any
     # shared/deployed environment - generate one with:

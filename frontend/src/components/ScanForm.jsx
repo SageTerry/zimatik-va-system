@@ -51,7 +51,7 @@ export default function ScanForm() {
       <Card>
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
-            <label className="mb-1 block font-body text-xs uppercase tracking-wide text-ink-3">
+            <label className="mb-1 block font-body text-xs font-semibold uppercase tracking-wide text-ink-3">
               Target URL
             </label>
             <input
@@ -60,8 +60,10 @@ export default function ScanForm() {
               onChange={(e) => setTargetUrl(e.target.value)}
               placeholder="https://example.com"
               autoComplete="off"
-              className={`radius-b w-full border bg-transparent px-3 py-2 font-body text-sm text-ink focus:outline-none ${
-                urlLooksValid ? 'border-line-strong focus:border-ink-2' : 'border-severity-high'
+              className={`radius-b w-full border bg-surface px-3.5 py-2.5 font-body text-sm text-ink transition-colors focus:outline-none focus:ring-2 ${
+                urlLooksValid
+                  ? 'border-line-strong focus:border-brand focus:ring-brand/15'
+                  : 'border-severity-high focus:ring-severity-high/15'
               }`}
             />
           </div>

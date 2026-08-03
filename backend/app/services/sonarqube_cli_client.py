@@ -24,6 +24,7 @@ sonar-scanner's own lifecycle:
 from __future__ import annotations
 
 import logging
+import re
 import subprocess
 import time
 from pathlib import Path
@@ -40,6 +41,10 @@ SCANNER_TIMEOUT = 900  # seconds; sonar-scanner itself can take a while on a lar
 CE_POLL_INTERVAL = 2  # seconds between Compute Engine task status checks
 CE_POLL_TIMEOUT = 300  # seconds to wait for server-side analysis to finish after the scan
 PAGE_SIZE = 500
+
+_CWE_TAG_RE = re.compile(r"^cwe-(\d+)$", re.IGNORECASE)
+_CWE_TEXT_RE = re.compile(r"CWE-(\d+)", re.IGNORECASE)
+_HTML_TAG_RE = re.compile(r"<[^>]+>")
 
 _SEVERITY_MAP: Dict[str, Severity] = {
     "BLOCKER": Severity.CRITICAL,
@@ -211,7 +216,18 @@ class SonarQubeClient:
             time.sleep(CE_POLL_INTERVAL)
 
     def _fetch_issues(self) -> List[Dict[str, Any]]:
-        """Fetch every vulnerability issue for ``project_key`` once analysis has succeeded."""
+        """Fetch every vulnerability issue for ``project_key`` once analysis has succeeded.
+
+        A plain ``/api/issues/search`` result only carries the issue itself
+        (message, severity, rule key, file/line) - it doesn't include the
+        rule's remediation text or the surrounding source code that
+        ``normalize_finding`` needs for proof of concept / CWE / remediation.
+        Each issue is enriched with the same two extra lookups the REST
+        client (``app.services.sonarqube_client``) makes -
+        ``/api/rules/show`` (cached per rule key) and ``/api/sources/lines``
+        - merged in under an ``extra`` key. A failure enriching one issue is
+        logged and left null rather than failing the whole scan.
+        """
         issues: List[Dict[str, Any]] = []
         page = 1
         while True:
@@ -241,16 +257,84 @@ class SonarQubeClient:
                 break
             page += 1
 
-        return issues
+        rule_cache: Dict[str, Optional[Dict[str, Any]]] = {}
+        enriched: List[Dict[str, Any]] = []
+        for issue in issues:
+            rule_key = issue.get("rule")
+            if rule_key and rule_key not in rule_cache:
+                rule_cache[rule_key] = self._fetch_rule_detail(rule_key)
+            rule_detail = rule_cache.get(rule_key) if rule_key else None
+
+            component = issue.get("component")
+            line = issue.get("line") or (issue.get("textRange") or {}).get("startLine")
+            code_context = (
+                self._fetch_code_snippet(component, line) if component and line else None
+            )
+
+            enriched.append({**issue, "extra": {"rule": rule_detail, "code_context": code_context}})
+
+        return enriched
+
+    def _fetch_rule_detail(self, rule_key: str) -> Optional[Dict[str, Any]]:
+        """Fetch a rule's full detail (description, tags) for CWE/remediation extraction."""
+        try:
+            response = self._session.get(
+                f"{self.host_url}/api/rules/show",
+                params={"key": rule_key},
+                timeout=30,
+                verify=self.verify_ssl,
+            )
+            response.raise_for_status()
+            payload = response.json()
+        except (requests.exceptions.RequestException, ValueError) as exc:
+            logger.warning("Failed to fetch SonarQube rule detail for rule_key=%s: %s", rule_key, exc)
+            return None
+        return payload.get("rule")
+
+    def _fetch_code_snippet(
+        self, component: str, line: int, context_lines: int = 3
+    ) -> Optional[str]:
+        """Fetch a few source lines around ``line`` to use as proof-of-concept context."""
+        from_line = max(1, line - context_lines)
+        to_line = line + context_lines
+        try:
+            response = self._session.get(
+                f"{self.host_url}/api/sources/lines",
+                params={"key": component, "from": from_line, "to": to_line},
+                timeout=30,
+                verify=self.verify_ssl,
+            )
+            response.raise_for_status()
+            payload = response.json()
+        except (requests.exceptions.RequestException, ValueError) as exc:
+            logger.warning(
+                "Failed to fetch SonarQube source lines for component=%s line=%s: %s",
+                component,
+                line,
+                exc,
+            )
+            return None
+
+        lines = payload.get("sources") or []
+        if not lines:
+            return None
+        formatted = [
+            f"{entry.get('line')}: {self._strip_html(entry.get('code') or '')}" for entry in lines
+        ]
+        return "\n".join(formatted)
 
     def normalize_finding(self, sonar_json_entry: Dict[str, Any]) -> NormalizedFinding:
         """Convert one raw issue (from ``analyze``) into VACE's unified schema.
 
-        Severity, CWE, and location extraction mirror the REST client's
-        ``normalize_finding`` (see ``app.services.sonarqube_client``) minus
-        the rule-detail/code-snippet enrichment, which needs extra API calls
-        this client doesn't make.
+        Mirrors the REST client's ``normalize_finding`` (see
+        ``app.services.sonarqube_client``) exactly, including the rule-detail
+        (remediation guidance) and code-snippet (proof of concept)
+        enrichment ``_fetch_issues`` attaches under ``extra``.
         """
+        extra = sonar_json_entry.get("extra") or {}
+        rule = extra.get("rule") or {}
+        code_context = extra.get("code_context")
+
         message = sonar_json_entry.get("message") or "Untitled SonarQube issue"
         component = sonar_json_entry.get("component") or ""
         code_file = component.split(":", 1)[1] if ":" in component else (component or None)
@@ -258,18 +342,21 @@ class SonarQubeClient:
             "startLine"
         )
 
+        proof_of_concept = f"{message}\n\nCode context:\n{code_context}" if code_context else message
+        remediation = self._strip_html(self._rule_description_text(rule)) or None
+
         return NormalizedFinding(
             tool_source=ToolSource.SONARQUBE,
             tool_finding_id=sonar_json_entry.get("key"),
             title=message[:500],
             description=message,
-            cwe_id=None,
+            cwe_id=self._extract_cwe(rule),
             severity_normalized=self._normalize_severity(sonar_json_entry),
             location_type=LocationType.CODE,
             code_file=code_file,
             code_line=code_line,
-            proof_of_concept=message,
-            recommended_fix=None,
+            proof_of_concept=proof_of_concept,
+            recommended_fix=remediation,
         )
 
     @staticmethod
@@ -282,3 +369,41 @@ class SonarQubeClient:
             if impact_severity in _IMPACT_SEVERITY_MAP:
                 return _IMPACT_SEVERITY_MAP[impact_severity]
         return Severity.INFO
+
+    @staticmethod
+    def _rule_description_text(rule: Dict[str, Any]) -> str:
+        """Concatenate whatever description fields the rule detail response provides.
+
+        Older SonarQube versions return a single ``htmlDesc``/``mdDesc``;
+        newer ones split the description into ``descriptionSections``
+        (e.g. "root_cause", "how_to_fix").
+        """
+        parts: List[str] = []
+        if rule.get("htmlDesc"):
+            parts.append(rule["htmlDesc"])
+        if rule.get("mdDesc"):
+            parts.append(rule["mdDesc"])
+        for section in rule.get("descriptionSections") or []:
+            content = section.get("content")
+            if content:
+                parts.append(content)
+        return "\n\n".join(parts)
+
+    @classmethod
+    def _extract_cwe(cls, rule: Dict[str, Any]) -> Optional[str]:
+        for tag in rule.get("tags") or []:
+            match = _CWE_TAG_RE.match(tag)
+            if match:
+                return f"CWE-{match.group(1)}"
+
+        description = cls._rule_description_text(rule)
+        if description:
+            match = _CWE_TEXT_RE.search(description)
+            if match:
+                return f"CWE-{match.group(1)}"
+
+        return None
+
+    @staticmethod
+    def _strip_html(text: str) -> str:
+        return _HTML_TAG_RE.sub("", text).strip()

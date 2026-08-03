@@ -51,6 +51,7 @@ from app.models.finding import (
     Scan,
     ScanStatus,
     Severity,
+    ThreatStatus,
     ToolSource,
 )
 from app.services.bandit_client import BanditClient, BanditError
@@ -69,6 +70,7 @@ from app.services.safety_client import SafetyClient, SafetyError
 from app.services.sonarqube_client import get_sonarqube_client
 from app.services.sonarqube_cli_client import SonarQubeCliError
 from app.services.sonarqube_cli_client import SonarQubeClient as SonarQubeCliClient
+from app.services.threat_intel_client import ThreatIntelError, get_threat_intel_client
 from app.services.zap_client import ACTIVE_SCAN_TIMEOUT, ZapAPIError, get_zap_client
 
 logger = logging.getLogger(__name__)
@@ -151,6 +153,8 @@ class FindingRead(BaseModel):
     remediation_status: RemediationStatus
     business_context: Optional[str] = None
     tags: List[Any]
+    threat_status: ThreatStatus
+    threat_intel_enriched_at: Optional[datetime] = None
     created_at: datetime
     updated_at: datetime
 
@@ -617,6 +621,62 @@ _CODE_IMPORTERS: List[Callable[[Session, Scan], Tuple[int, int]]] = [
 ]
 
 
+def _enrich_findings_with_threat_intel(db: Session, scan: Scan) -> None:
+    """Look up CISA KEV / NVD threat status for every CVE-bearing finding on ``scan``.
+
+    Runs synchronously at the tail of the scan's own background task rather
+    than as a separate queued job - there's no task queue in this codebase
+    (BackgroundTasks already *is* the background job), and by this point the
+    scan is already COMPLETED, so this step's own failures must never flip
+    it back to FAILED. A failure enriching one finding (CISA/NVD down, a
+    malformed CVE id, ...) is logged and that finding is left/reset to
+    UNKNOWN; the loop always continues to the next finding.
+    """
+    findings = (
+        db.execute(
+            select(Finding).where(Finding.scan_id == scan.id, Finding.cve_id.is_not(None))
+        )
+        .scalars()
+        .all()
+    )
+    if not findings:
+        return
+
+    client = get_threat_intel_client()
+    enriched = 0
+    failed = 0
+    for finding in findings:
+        try:
+            status_str = client.get_threat_status(finding.cve_id)
+            finding.threat_status = ThreatStatus(status_str)
+            enriched += 1
+        except ThreatIntelError as exc:
+            logger.warning(
+                "Threat intel enrichment failed for finding_id=%s cve_id=%s: %s",
+                finding.id,
+                finding.cve_id,
+                exc,
+            )
+            finding.threat_status = ThreatStatus.UNKNOWN
+            failed += 1
+        finding.threat_intel_enriched_at = datetime.now(timezone.utc)
+
+    try:
+        db.commit()
+    except SQLAlchemyError:
+        db.rollback()
+        logger.exception("Failed to persist threat intel enrichment for scan_id=%s", scan.id)
+        return
+
+    logger.info(
+        "Threat intel enrichment complete for scan_id=%s: %d enriched, %d failed (of %d CVE findings)",
+        scan.id,
+        enriched,
+        failed,
+        len(findings),
+    )
+
+
 def _perform_code_import(scan_id: uuid.UUID) -> None:
     """Background task: run Bandit -> Safety -> SonarQube sequentially against a code scan.
 
@@ -665,6 +725,11 @@ def _perform_code_import(scan_id: uuid.UUID) -> None:
             total_imported,
             total_errors,
         )
+
+        try:
+            _enrich_findings_with_threat_intel(db, scan)
+        except Exception:
+            logger.exception("Threat intel enrichment crashed for scan_id=%s", scan_id)
     finally:
         db.close()
 
@@ -718,6 +783,11 @@ def _perform_import(scan_id: uuid.UUID, tools: List[ToolSource]) -> None:
             total_imported,
             total_errors,
         )
+
+        try:
+            _enrich_findings_with_threat_intel(db, scan)
+        except Exception:
+            logger.exception("Threat intel enrichment crashed for scan_id=%s", scan_id)
     finally:
         db.close()
 

@@ -1,16 +1,16 @@
 const SEVERITY_STYLES = {
-  critical: 'text-severity-critical border-severity-critical',
-  high: 'text-severity-high border-severity-high',
-  medium: 'text-severity-medium border-severity-medium',
-  low: 'text-severity-low border-severity-low',
-  resolved: 'text-severity-resolved border-severity-resolved',
-  info: 'text-severity-info border-severity-info',
+  critical: 'text-severity-critical bg-severity-critical/10',
+  high: 'text-severity-high bg-severity-high/10',
+  medium: 'text-severity-medium bg-severity-medium/10',
+  low: 'text-severity-low bg-severity-low/10',
+  resolved: 'text-severity-resolved bg-severity-resolved/10',
+  info: 'text-severity-info bg-severity-info/10',
 }
 
 export default function Badge({ severity = 'info', children, className = '' }) {
   return (
     <span
-      className={`radius-c inline-flex items-center gap-1 border bg-transparent px-2.5 py-0.5 font-body text-xs font-bold uppercase tracking-wide ${
+      className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 font-body text-xs font-semibold uppercase tracking-wide ${
         SEVERITY_STYLES[severity] ?? SEVERITY_STYLES.info
       } ${className}`}
     >

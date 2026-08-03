@@ -35,12 +35,13 @@ export const REMEDIATION_STATUS_BADGE = {
 }
 
 // Same palette as REMEDIATION_STATUS_BADGE, expressed as classes for a
-// <select> rather than a <span> (Badge itself isn't a form control).
+// <select> rather than a <span> (Badge itself isn't a form control) - a
+// tinted fill (not just an outline) to match Badge's pill styling.
 export const REMEDIATION_STATUS_SELECT_CLASSES = {
-  OPEN: 'text-severity-high border-severity-high',
-  IN_PROGRESS: 'text-severity-medium border-severity-medium',
-  REMEDIATED: 'text-severity-resolved border-severity-resolved',
-  RISK_ACCEPTED: 'text-severity-resolved border-severity-resolved',
-  FALSE_POSITIVE: 'text-severity-resolved border-severity-resolved',
-  WONT_FIX: 'text-severity-resolved border-severity-resolved',
+  OPEN: 'text-severity-high bg-severity-high/10 border-transparent',
+  IN_PROGRESS: 'text-severity-medium bg-severity-medium/10 border-transparent',
+  REMEDIATED: 'text-severity-resolved bg-severity-resolved/10 border-transparent',
+  RISK_ACCEPTED: 'text-severity-resolved bg-severity-resolved/10 border-transparent',
+  FALSE_POSITIVE: 'text-severity-resolved bg-severity-resolved/10 border-transparent',
+  WONT_FIX: 'text-severity-resolved bg-severity-resolved/10 border-transparent',
 }

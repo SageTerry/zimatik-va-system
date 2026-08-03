@@ -81,19 +81,19 @@ export default function MobileScanForm() {
       <Card>
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
-            <label className="mb-1 block font-body text-xs uppercase tracking-wide text-ink-3">App name</label>
+            <label className="mb-1 block font-body text-xs font-semibold uppercase tracking-wide text-ink-3">App name</label>
             <input
               type="text"
               value={appName}
               onChange={(e) => setAppName(e.target.value)}
               placeholder="e.g. My Banking App v2.3"
               autoComplete="off"
-              className="radius-b w-full border border-line-strong bg-transparent px-3 py-2 font-body text-sm text-ink focus:border-ink-2 focus:outline-none"
+              className="radius-b w-full border border-line-strong bg-surface px-3.5 py-2.5 font-body text-sm text-ink transition-colors focus:border-brand focus:outline-none focus:ring-2 focus:ring-brand/15"
             />
           </div>
 
           <div>
-            <label className="mb-1 block font-body text-xs uppercase tracking-wide text-ink-3">APK file</label>
+            <label className="mb-1 block font-body text-xs font-semibold uppercase tracking-wide text-ink-3">APK file</label>
             <div
               onDragOver={handleDragOver}
               onDragLeave={handleDragLeave}
@@ -105,10 +105,10 @@ export default function MobileScanForm() {
                 if (e.key === 'Enter' || e.key === ' ') fileInputRef.current?.click()
               }}
               className={`radius-b flex cursor-pointer flex-col items-center justify-center gap-2 border border-dashed px-4 py-8 text-center transition-colors ${
-                dragActive ? 'border-ink bg-sunken' : 'border-line-strong hover:bg-sunken/60'
+                dragActive ? 'border-brand bg-brand-light' : 'border-line-strong hover:bg-sunken'
               }`}
             >
-              <UploadIcon size={24} className="text-ink-2" />
+              <UploadIcon size={24} className="text-brand" />
               {file ? (
                 <p className="font-body text-sm text-ink">{file.name}</p>
               ) : (

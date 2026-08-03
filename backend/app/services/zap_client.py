@@ -38,6 +38,15 @@ POLL_INTERVAL = 2  # seconds between spider-completion polls
 SPIDER_TIMEOUT = 600  # seconds (10 min) max wait for the spider phase to finish
 ACTIVE_SCAN_TIMEOUT = 1800  # seconds (30 min) max wait for the active-scan phase to finish
 
+# "Cross Site Scripting (DOM Based)" is the only active-scan rule that spins
+# up a real headless browser (via Selenium) per scanning thread. The zaproxy
+# Docker image has no browser installed, so every attempt fails anyway
+# ("failed to start browser") while still paying the memory/thread cost of
+# trying - a real contributor to the daemon being OOM-killed mid-scan.
+# Disabled unconditionally rather than only in Docker, since it can't
+# succeed in this client's target environment either way.
+DOM_XSS_SCANNER_ID = "40026"
+
 # ZAP reports risk as one of these four strings; VACE's Severity enum adds
 # CRITICAL, which ZAP never emits directly, so there's no CRITICAL mapping -
 # same shape as how Nessus's severity 4 is the only path to CRITICAL today.
@@ -158,6 +167,8 @@ class ZapClient:
         ``ZapAPIError`` if the spider doesn't finish within
         ``SPIDER_TIMEOUT``.
         """
+        self._disable_browser_based_scanners()
+
         logger.info("Starting ZAP spider against %s", target_url)
         spider_scan_id = str(self._request("/JSON/spider/action/scan/", {"url": target_url})["scan"])
         self._await_completion(
@@ -171,6 +182,19 @@ class ZapClient:
         ascan_scan_id = str(self._request("/JSON/ascan/action/scan/", {"url": target_url})["scan"])
         self._target_by_scan_id[ascan_scan_id] = target_url
         return ascan_scan_id
+
+    def _disable_browser_based_scanners(self) -> None:
+        """Best-effort: turn off active-scan rules that need a real browser.
+
+        Non-fatal if this fails (e.g. against a ZAP version where the rule
+        ID has changed) - worst case those rules run and fail to launch a
+        browser same as before, so this is a memory optimization, not a
+        correctness requirement.
+        """
+        try:
+            self._request("/JSON/ascan/action/disableScanners/", {"ids": DOM_XSS_SCANNER_ID})
+        except ZapAPIError as exc:
+            logger.warning("Failed to disable browser-based ZAP scan rules: %s", exc)
 
     def _await_completion(self, status_path: str, scan_id: str, timeout: int, phase: str) -> None:
         deadline = time.monotonic() + timeout

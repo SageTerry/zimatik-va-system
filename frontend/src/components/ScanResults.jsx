@@ -57,7 +57,7 @@ export default function ScanResults() {
         <div className="flex flex-wrap items-start gap-3">
           <Link
             to={`/reports/${scanId}`}
-            className="radius-b inline-flex items-center gap-2 border border-line-strong bg-transparent px-4 py-2 font-body text-sm text-ink transition-colors hover:bg-sunken"
+            className="radius-b inline-flex items-center gap-2 border border-line-strong bg-surface px-4 py-2.5 font-body text-sm font-semibold text-ink transition-colors hover:bg-sunken"
           >
             View Executive Report
           </Link>
@@ -65,14 +65,14 @@ export default function ScanResults() {
         </div>
       </div>
 
-      <div className="radius-a overflow-x-auto border border-line">
+      <div className="radius-a overflow-x-auto border border-line bg-surface shadow-card">
         <table className="min-w-full divide-y divide-line">
           <thead>
-            <tr>
-              <th className="px-4 py-3 text-left font-body text-xs uppercase tracking-wide text-ink-3">Title</th>
-              <th className="px-4 py-3 text-left font-body text-xs uppercase tracking-wide text-ink-3">Severity</th>
-              <th className="px-4 py-3 text-left font-body text-xs uppercase tracking-wide text-ink-3">URL</th>
-              <th className="px-4 py-3 text-left font-body text-xs uppercase tracking-wide text-ink-3">Status</th>
+            <tr className="bg-sunken">
+              <th className="px-4 py-3 text-left font-body text-xs font-semibold uppercase tracking-wide text-ink-3">Title</th>
+              <th className="px-4 py-3 text-left font-body text-xs font-semibold uppercase tracking-wide text-ink-3">Severity</th>
+              <th className="px-4 py-3 text-left font-body text-xs font-semibold uppercase tracking-wide text-ink-3">URL</th>
+              <th className="px-4 py-3 text-left font-body text-xs font-semibold uppercase tracking-wide text-ink-3">Status</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-line">

@@ -3,33 +3,47 @@
 
 @layer base {
   body {
-    background-color: #ece8df;
-    color: #2b2925;
-    font-family: 'Patrick Hand', cursive;
+    background-color: #F1F3F6;
+    color: #0B1F3A;
+    font-family: 'Plus Jakarta Sans', sans-serif;
+    -webkit-font-smoothing: antialiased;
   }
 
   h1, h2, h3, h4, h5, h6 {
-    font-family: 'Kalam', cursive;
-    font-weight: 400;
+    font-family: 'Plus Jakarta Sans', sans-serif;
+    font-weight: 700;
   }
 
   ::selection {
-    background-color: #c9c1ae;
-    color: #2b2925;
+    background-color: #EAF1FB;
+    color: #0B1F3A;
+  }
+
+  :focus-visible {
+    outline: 2px solid #1857A4;
+    outline-offset: 2px;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
+    }
   }
 }
 
 @layer utilities {
-  /* Irregular, hand-cut corner radii - three scales, used instead of a
-     single uniform rounded-* value so nothing on the page reads as a
-     perfect machine-drawn rectangle. */
+  /* Consistent, clean corner radii - three scales used across cards,
+     buttons/inputs, and small pills/badges respectively. */
   .radius-a {
-    border-radius: 18px 9px 20px 11px / 11px 20px 9px 18px;
+    border-radius: 20px;
   }
   .radius-b {
-    border-radius: 10px 16px 9px 15px / 14px 8px 15px 9px;
+    border-radius: 12px;
   }
   .radius-c {
-    border-radius: 8px 12px 7px 11px / 10px 6px 11px 7px;
+    border-radius: 10px;
   }
 }

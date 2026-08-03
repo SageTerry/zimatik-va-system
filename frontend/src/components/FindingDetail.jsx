@@ -5,6 +5,7 @@ import ReportDownloadButton from './ReportDownloadButton'
 import Card from './Card'
 import Badge from './Badge'
 import { REMEDIATION_STATUS_BADGE, SEVERITY_BADGE } from '../lib/constants'
+import { ChevronLeftIcon } from '../lib/icons'
 
 function Field({ label, value }) {
   if (value === null || value === undefined || value === '') return null
@@ -65,9 +66,10 @@ function FindingDetailView({ id }) {
   const backButton = (
     <button
       onClick={() => navigate('/findings')}
-      className="inline-flex items-center gap-1.5 font-body text-sm text-ink-2 transition-colors hover:text-ink"
+      className="inline-flex cursor-pointer items-center gap-1.5 font-body text-sm font-medium text-ink-2 transition-colors hover:text-ink"
     >
-      ← Back to findings
+      <ChevronLeftIcon size={16} strokeWidth={2.5} />
+      Back to findings
     </button>
   )
 

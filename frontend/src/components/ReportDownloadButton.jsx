@@ -3,7 +3,7 @@ import { downloadTechnicalReport } from '../api/client'
 import { defaultReportFilename, filenameFromContentDisposition, triggerFileDownload } from '../lib/download'
 
 const DEFAULT_CLASSES =
-  'radius-b inline-flex items-center gap-2 border border-line-strong bg-transparent px-4 py-2 font-body text-sm text-ink transition-colors hover:bg-sunken disabled:cursor-not-allowed disabled:opacity-50'
+  'radius-b inline-flex cursor-pointer items-center gap-2 border border-line-strong bg-surface px-4 py-2.5 font-body text-sm font-semibold text-ink transition-colors hover:bg-sunken disabled:cursor-not-allowed disabled:opacity-50'
 
 function DownloadIcon() {
   return (

@@ -1,8 +1,11 @@
 """FastAPI application entrypoint for VACE."""
 
 import logging
+import os
+import re
 import sys
 from contextlib import asynccontextmanager
+from logging.handlers import RotatingFileHandler
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -12,18 +15,28 @@ from sqlalchemy import select
 from app.api.auth import router as auth_router
 from app.api.credentials import router as credentials_router
 from app.api.findings import router as findings_router
+from app.api.threat_intel import router as threat_intel_router
 from app.api.webhooks import router as webhooks_router
 from app.config import settings
 from app.database import get_session_factory
 from app.models.user import User
 from app.services.auth_service import InvalidTokenError, decode_jwt_token
 
-logging.basicConfig(
-    level=settings.LOG_LEVEL,
-    format="%(asctime)s | %(levelname)-8s | %(name)s | %(message)s",
-    stream=sys.stdout,
-)
+LOG_FORMAT = "%(asctime)s | %(levelname)-8s | %(name)s | %(message)s"
+
+logging.basicConfig(level=settings.LOG_LEVEL, format=LOG_FORMAT, stream=sys.stdout)
 logger = logging.getLogger("vace")
+
+# Every ERROR-and-above record from any module's logger (DB failures already
+# wrapped in try/except SQLAlchemyError blocks, the unhandled-exception
+# handler below, etc.) also lands here, timestamped, independent of the
+# console's LOG_LEVEL - so a failure is still on disk after stdout is gone.
+# Rotated at 5MB x 5 backups so this can't grow without bound.
+os.makedirs(os.path.dirname(settings.ERROR_LOG_FILE) or ".", exist_ok=True)
+_error_file_handler = RotatingFileHandler(settings.ERROR_LOG_FILE, maxBytes=5 * 1024 * 1024, backupCount=5)
+_error_file_handler.setLevel(logging.ERROR)
+_error_file_handler.setFormatter(logging.Formatter(LOG_FORMAT))
+logging.getLogger().addHandler(_error_file_handler)
 
 # Paths reachable without a JWT. `/api/v1/webhooks` is exempted (rather than
 # following the spec's literal "only /health and /auth/login" list) because
@@ -32,6 +45,13 @@ logger = logging.getLogger("vace")
 # a user's bearer token, so gating it behind JWT would 401 every real push.
 PUBLIC_PATHS = {"/health", "/api/v1/auth/login"}
 PUBLIC_PREFIXES = ("/api/v1/webhooks",)
+
+# Browsers' native EventSource API cannot set a custom Authorization header,
+# so the one SSE streaming endpoint also accepts the token as a query param
+# (frontend/src/api/client.js's openScanProgressStream) - scoped to just
+# this path rather than accepting query-param tokens everywhere, since URLs
+# (with their query strings) tend to end up in access logs/browser history.
+SSE_PROGRESS_PATH_RE = re.compile(r"^/api/v1/scans/[^/]+/progress$")
 
 
 def _seed_default_user() -> None:
@@ -83,7 +103,10 @@ async def jwt_auth_middleware(request: Request, call_next):
     auth_header = request.headers.get("Authorization", "")
     scheme, _, token = auth_header.partition(" ")
     if scheme.lower() != "bearer" or not token:
-        return JSONResponse(status_code=401, content={"detail": "Missing or invalid Authorization header"})
+        if SSE_PROGRESS_PATH_RE.match(path):
+            token = request.query_params.get("token", "")
+        if not token:
+            return JSONResponse(status_code=401, content={"detail": "Missing or invalid Authorization header"})
 
     try:
         decode_jwt_token(token)
@@ -93,10 +116,24 @@ async def jwt_auth_middleware(request: Request, call_next):
     return await call_next(request)
 
 
+@app.exception_handler(Exception)
+async def unhandled_exception_handler(request: Request, exc: Exception) -> JSONResponse:
+    """Safety net for exceptions that escape a route's own error handling.
+
+    FastAPI's built-in handlers already cover HTTPException/validation
+    errors (never reaches here); this only catches genuinely unexpected
+    bugs, and guarantees they're logged - with a traceback - to both stdout
+    and errors.log before the client gets a generic 500.
+    """
+    logger.error("Unhandled exception on %s %s", request.method, request.url.path, exc_info=exc)
+    return JSONResponse(status_code=500, content={"detail": "Internal server error"})
+
+
 app.include_router(auth_router)
 app.include_router(findings_router)
 app.include_router(credentials_router)
 app.include_router(webhooks_router)
+app.include_router(threat_intel_router)
 
 
 @app.get("/health")

@@ -7,7 +7,7 @@ import StatCard from './StatCard'
 import Badge from './Badge'
 import ProgressBar from './ProgressBar'
 import { SEVERITY_BADGE, SEVERITY_ORDER } from '../lib/constants'
-import { RadarIcon, TargetIcon, WarnCircleIcon } from '../lib/icons'
+import { ChevronRightIcon, RadarIcon, TargetIcon, WarnCircleIcon } from '../lib/icons'
 
 // The report endpoint takes explicit finding_ids rather than "everything" -
 // this pulls the first page at the API's max page size, which comfortably
@@ -106,9 +106,10 @@ export default function Dashboard() {
           )}
           <Link
             to="/findings"
-            className="mt-4 inline-flex items-center gap-1 font-body text-ink-2 underline decoration-line-strong underline-offset-4 hover:text-ink"
+            className="mt-4 inline-flex items-center gap-1 font-body text-sm font-semibold text-brand transition-colors hover:text-brand-dark"
           >
-            View all findings →
+            View all findings
+            <ChevronRightIcon size={16} strokeWidth={2.5} />
           </Link>
         </Card>
 

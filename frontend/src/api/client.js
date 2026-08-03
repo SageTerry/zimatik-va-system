@@ -7,6 +7,36 @@ export const apiClient = axios.create({
   headers: { 'Content-Type': 'application/json' },
 })
 
+// Attaches the stored JWT (if any) to every request. Login itself goes
+// through this same client - there's just no token yet on that first call,
+// so the header is simply omitted rather than sent as "Bearer null".
+apiClient.interceptors.request.use((config) => {
+  const token = localStorage.getItem('access_token')
+  if (token) {
+    config.headers.Authorization = `Bearer ${token}`
+  }
+  return config
+})
+
+// A 401 means the token is missing/expired/invalid - clear it and bounce to
+// the login page. A hard redirect (not react-router navigation) since this
+// runs outside any component/router context.
+apiClient.interceptors.response.use(
+  (response) => response,
+  (error) => {
+    if (error.response?.status === 401 && window.location.pathname !== '/login') {
+      localStorage.removeItem('access_token')
+      window.location.assign('/login')
+    }
+    return Promise.reject(error)
+  },
+)
+
+export async function login(username, password) {
+  const { data } = await apiClient.post('/auth/login', { username, password })
+  return data
+}
+
 export async function getFindings(filters = {}) {
   const { severity, tool, host, scan_id, page, page_size } = filters
   const { data } = await apiClient.get('/findings', {
@@ -89,8 +119,16 @@ export async function getScan(scanId) {
 // called with the parsed payload on every frame; `onError` on a connection
 // error. Returns a cleanup function that closes the connection - call it on
 // unmount or once the scan reaches a terminal status.
+//
+// The browser's native EventSource can't set an Authorization header, so
+// the token is passed as a query param instead - the backend's JWT
+// middleware special-cases this one path to accept it that way.
 export function openScanProgressStream(scanId, { onMessage, onError } = {}) {
-  const source = new EventSource(`${API_BASE_URL}/scans/${scanId}/progress`)
+  const url = new URL(`${API_BASE_URL}/scans/${scanId}/progress`)
+  const token = localStorage.getItem('access_token')
+  if (token) url.searchParams.set('token', token)
+
+  const source = new EventSource(url)
   source.onmessage = (event) => onMessage?.(JSON.parse(event.data))
   source.onerror = (event) => onError?.(event)
   return () => source.close()
