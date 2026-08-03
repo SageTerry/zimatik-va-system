@@ -74,25 +74,12 @@ async def lifespan(_app: FastAPI):
 
 app = FastAPI(title=settings.APP_NAME, debug=settings.DEBUG, lifespan=lifespan)
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=settings.CORS_ORIGINS,
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-    # Browsers hide response headers cross-origin unless explicitly exposed;
-    # the frontend reads this to name downloaded report PDFs after the
-    # server-generated filename instead of falling back to a client-side one.
-    expose_headers=["Content-Disposition"],
-)
-
 
 @app.middleware("http")
 async def jwt_auth_middleware(request: Request, call_next):
     # CORS preflight carries no Authorization header by design; let it
     # through regardless of path so the browser's real (auth'd) request can
-    # follow. This is deliberately independent of CORSMiddleware's position
-    # in the stack - no assumption about middleware ordering required.
+    # follow.
     if request.method == "OPTIONS":
         return await call_next(request)
 
@@ -114,6 +101,27 @@ async def jwt_auth_middleware(request: Request, call_next):
         return JSONResponse(status_code=401, content={"detail": "Invalid or expired token"})
 
     return await call_next(request)
+
+
+# Registered after jwt_auth_middleware (Starlette's add_middleware inserts at
+# the front of the stack, so whichever is added last ends up outermost) so
+# that this wraps AROUND the auth middleware. Otherwise the 401 responses
+# above - which return directly rather than calling call_next - would bypass
+# CORSMiddleware entirely and reach the browser with no CORS headers at all,
+# which shows up as an opaque "blocked by CORS policy" network error instead
+# of a readable 401, and defeats the frontend's 401 -> redirect-to-login
+# handling (frontend/src/services/errorHandler.js).
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=settings.CORS_ORIGINS,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+    # Browsers hide response headers cross-origin unless explicitly exposed;
+    # the frontend reads this to name downloaded report PDFs after the
+    # server-generated filename instead of falling back to a client-side one.
+    expose_headers=["Content-Disposition"],
+)
 
 
 @app.exception_handler(Exception)

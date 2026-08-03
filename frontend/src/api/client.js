@@ -1,4 +1,5 @@
 import axios from 'axios'
+import { handleApiError } from '../services/errorHandler'
 
 const API_BASE_URL = 'http://localhost:8001/api/v1'
 
@@ -18,15 +19,26 @@ apiClient.interceptors.request.use((config) => {
   return config
 })
 
-// A 401 means the token is missing/expired/invalid - clear it and bounce to
-// the login page. A hard redirect (not react-router navigation) since this
-// runs outside any component/router context.
+// Set by ErrorContext on mount so any API error, anywhere in the app, can
+// surface a toast automatically - call sites don't need their own catch
+// block just to display a failure.
+let onApiError = null
+export function registerApiErrorHandler(handler) {
+  onApiError = handler
+}
+
+// errorHandler.handleApiError does the actual parsing (message extraction,
+// 401 -> clear token + redirect to /login). This just wires its result into
+// the registered toast handler and re-rejects so callers can still `catch`
+// if they need to react locally (e.g. a form showing a field error).
 apiClient.interceptors.response.use(
   (response) => response,
   (error) => {
-    if (error.response?.status === 401 && window.location.pathname !== '/login') {
-      localStorage.removeItem('access_token')
-      window.location.assign('/login')
+    const parsedError = handleApiError(error)
+    // A 401 is about to redirect away from the current page - flashing a
+    // toast right before navigating away isn't useful.
+    if (parsedError.status !== 401) {
+      onApiError?.(parsedError)
     }
     return Promise.reject(error)
   },
@@ -38,9 +50,9 @@ export async function login(username, password) {
 }
 
 export async function getFindings(filters = {}) {
-  const { severity, tool, host, scan_id, page, page_size } = filters
+  const { severity, tool, host, scan_id, threat_status, sort, page, page_size } = filters
   const { data } = await apiClient.get('/findings', {
-    params: { severity, tool, host, scan_id, page, page_size },
+    params: { severity, tool, host, scan_id, threat_status, sort, page, page_size },
   })
   return data
 }
