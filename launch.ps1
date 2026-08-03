@@ -76,7 +76,7 @@ Start-Sleep -Seconds 5
 # Open browser
 if (-Not $NoOpen) {
     Write-Host "[*] Opening browser..." -ForegroundColor Yellow
-    Start-Process "http://localhost:5173"
+    Start-Process "http://localhost:5173/login"
 }
 
 Write-Host "[+] VACE is running!" -ForegroundColor Green
